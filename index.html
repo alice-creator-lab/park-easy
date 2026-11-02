@@ -1,0 +1,1307 @@
+<!doctype html>
+<html lang="zh-Hant-HK">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0b1220">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="description" content="香港泊車易：即時停車場空位、收費、時限，同全港咪錶佔用狀況一圖睇清。">
+<title>泊車易 · 香港泊車空位地圖</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='%230e9f6e'/><text x='32' y='47' font-size='38' font-family='system-ui' font-weight='800' text-anchor='middle' fill='white'>泊</text></svg>">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+/* ============================================================
+   泊車易 — design tokens
+   ============================================================ */
+:root{
+  --ink:#0f172a; --ink-2:#334155; --muted:#64748b; --faint:#94a3b8;
+  --line:#e7ecf3; --hair:#f1f5f9; --bg:#f4f6f9; --card:#fff;
+  --free:#0e9f6e; --few:#e8a400; --full:#e02424; --idle:#94a3b8;
+  --accent:#0b7a86;
+  --r-xl:20px; --r-lg:16px; --r-md:12px; --r-pill:999px;
+  --sh-1:0 2px 10px rgba(15,23,42,.10);
+  --sh-2:0 12px 32px rgba(15,23,42,.18);
+  --pad:12px;
+  --safe-t:env(safe-area-inset-top,0px);
+  --safe-b:env(safe-area-inset-bottom,0px);
+  --sheet:46vh;
+  --sheet:46dvh;
+  --ease:cubic-bezier(.22,.8,.28,1);
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;margin:0}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,"SF Pro TC","PingFang HK","Noto Sans TC","Microsoft JhengHei",system-ui,sans-serif;
+  color:var(--ink);background:var(--bg);overscroll-behavior:none;
+  -webkit-text-size-adjust:100%;
+}
+button{font:inherit;color:inherit}
+a{color:var(--accent)}
+
+/* ---------- map ---------- */
+#map{position:fixed;inset:0;background:#e9eef3}
+#map .leaflet-tile-pane{filter:saturate(.72) brightness(1.04) contrast(.97)}
+.leaflet-control-attribution{font-size:9px;background:rgba(255,255,255,.78);padding:1px 4px}
+.leaflet-control-zoom{margin-bottom:calc(var(--sheet) + 12px)!important}
+.leaflet-bar a{width:34px;height:34px;line-height:32px;color:var(--ink)}
+
+/* ---------- header ---------- */
+#top{
+  position:fixed;left:var(--pad);right:var(--pad);top:calc(var(--safe-t) + 8px);z-index:600;
+  display:flex;flex-direction:column;gap:8px;pointer-events:none;
+}
+#top>*{pointer-events:auto}
+.brand{
+  display:flex;align-items:center;gap:10px;background:var(--card);border-radius:var(--r-lg);
+  padding:9px 12px;box-shadow:var(--sh-1);
+}
+.logo{
+  width:34px;height:34px;flex:none;border-radius:11px;display:grid;place-items:center;
+  background:linear-gradient(155deg,#0e9f6e,#0b7a86);color:#fff;font-weight:800;font-size:17px;
+}
+.brand .bt{min-width:0;flex:1}
+.brand b{display:block;font-size:16px;line-height:1.2;letter-spacing:.2px}
+.brand small{display:block;font-size:11px;color:var(--muted);line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.live{
+  flex:none;display:flex;align-items:center;gap:5px;border:0;background:transparent;cursor:pointer;
+  font-size:10.5px;font-weight:700;color:var(--muted);padding:6px 4px;border-radius:8px;
+}
+.live i{width:7px;height:7px;border-radius:50%;background:var(--free);transition:background .2s}
+.live.stale i{background:var(--few)}
+.live.err i{background:var(--full)}
+.live.busy i{background:var(--idle);animation:pulse 1s infinite}
+@keyframes pulse{50%{opacity:.35}}
+
+.searchrow{display:flex;gap:8px}
+.qwrap{
+  flex:1;min-width:0;display:flex;align-items:center;gap:8px;background:var(--card);
+  border-radius:var(--r-lg);box-shadow:var(--sh-1);padding:0 12px;
+}
+.qwrap svg{width:16px;height:16px;flex:none;color:var(--faint)}
+#q{
+  flex:1;min-width:0;border:0;background:transparent;outline:none;color:var(--ink);
+  font-size:15px;padding:13px 0;appearance:none;
+}
+#q::placeholder{color:var(--faint)}
+#q::-webkit-search-cancel-button{-webkit-appearance:none}
+.iconbtn{
+  width:46px;flex:none;border:0;border-radius:var(--r-lg);background:var(--card);box-shadow:var(--sh-1);
+  display:grid;place-items:center;cursor:pointer;color:var(--accent);
+}
+.iconbtn svg{width:20px;height:20px}
+.iconbtn.on{background:var(--accent);color:#fff}
+.iconbtn.on svg{color:#fff}
+
+.chips{display:flex;gap:7px;overflow-x:auto;scrollbar-width:none;padding:1px 0 2px}
+.chips::-webkit-scrollbar{display:none}
+.chip{
+  flex:none;border:1px solid rgba(15,23,42,.06);background:rgba(255,255,255,.94);color:var(--ink-2);
+  border-radius:var(--r-pill);padding:8px 14px;font-size:12.5px;font-weight:650;box-shadow:0 2px 8px rgba(15,23,42,.07);
+  cursor:pointer;transition:background .15s,color .15s;
+}
+.chip.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+.chip[data-k="fav"]{display:none}
+.chip[data-k="fav"].avail{display:block}
+
+/* ---------- banner ---------- */
+#banner{
+  position:fixed;left:var(--pad);right:var(--pad);top:calc(var(--safe-t) + 132px);z-index:650;
+  background:#fdeaea;color:#991b1b;border-radius:var(--r-md);padding:9px 12px;
+  font-size:12px;line-height:1.5;box-shadow:var(--sh-1);display:none;
+}
+#banner.show{display:block}
+
+/* ---------- legend ---------- */
+#legend{
+  position:fixed;left:var(--pad);bottom:calc(var(--sheet) + 10px);z-index:600;
+  display:flex;flex-wrap:wrap;gap:10px;align-items:center;max-width:calc(100% - 2*var(--pad));
+  background:rgba(255,255,255,.94);border-radius:11px;padding:7px 10px;box-shadow:var(--sh-1);
+  font-size:10.5px;color:#475569;
+}
+#legend span{display:flex;align-items:center;gap:4px;white-space:nowrap}
+#legend i{width:8px;height:8px;border-radius:50%;display:block}
+
+/* ---------- bottom sheet ---------- */
+#sheet{
+  position:fixed;left:0;right:0;bottom:0;z-index:700;background:var(--card);
+  border-radius:var(--r-xl) var(--r-xl) 0 0;box-shadow:0 -8px 28px rgba(15,23,42,.14);
+  height:var(--sheet);display:flex;flex-direction:column;padding-bottom:var(--safe-b);
+  transition:height .28s var(--ease);will-change:height;
+}
+#sheet.tall{height:82vh;height:82dvh}
+.grab{flex:none;padding:9px 0 3px;display:grid;place-items:center;cursor:pointer;border:0;background:transparent;width:100%}
+.grab span{width:38px;height:4px;border-radius:4px;background:#cbd5e1}
+.tabs{flex:none;display:flex;align-items:center;gap:4px;padding:2px 12px 8px;border-bottom:1px solid var(--line)}
+.tab{
+  border:0;background:transparent;border-radius:9px;padding:6px 9px;cursor:pointer;
+  font-size:13.5px;font-weight:750;color:var(--muted);display:flex;align-items:baseline;gap:5px;
+}
+.tab b{font-size:10.5px;font-weight:750;color:var(--muted);background:var(--hair);border-radius:6px;padding:1px 5px}
+.tab.on{color:var(--ink);background:var(--hair)}
+.tab.on b{background:var(--ink);color:#fff}
+.stamp{margin-left:auto;text-align:right;font-size:10.5px;line-height:1.3;color:var(--muted);font-variant-numeric:tabular-nums}
+#list{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;padding-bottom:20px}
+
+/* ---------- list rows ---------- */
+.secttl{padding:10px 14px 4px;font-size:10.5px;font-weight:750;letter-spacing:.4px;color:var(--muted)}
+.row{
+  width:100%;display:flex;align-items:center;gap:11px;padding:12px 14px;min-height:56px;
+  border:0;background:transparent;text-align:left;cursor:pointer;border-bottom:1px solid var(--hair);
+}
+.row:active{background:#f8fafc}
+.dot{width:9px;height:9px;border-radius:50%;flex:none;background:var(--idle)}
+.dot.free{background:var(--free)}.dot.few{background:var(--few)}.dot.full{background:var(--full)}
+.dot.closed{background:#cbd5e1}.dot.unknown{background:var(--idle)}
+.row .main{flex:1;min-width:0}
+.row .main b{display:block;font-size:14px;font-weight:660;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .main small{display:block;font-size:11.5px;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .vac{flex:none;text-align:right;font-variant-numeric:tabular-nums}
+.row .vac b{font-size:18px;font-weight:760;line-height:1}
+.row .vac small{display:block;font-size:10.5px;color:var(--muted);margin-top:3px}
+.row .vac.free b{color:var(--free)}
+.row .vac.few b{color:var(--few)}
+.row .vac.full b{color:var(--full)}
+.row .vac.unknown b,.row .vac.closed b{font-size:13.5px;color:var(--muted)}
+.empty{padding:28px 22px;text-align:center;color:var(--muted);font-size:13px;line-height:1.7}
+.linkbtn{border:0;background:transparent;color:var(--accent);font-size:12.5px;font-weight:700;padding:8px;cursor:pointer}
+
+/* ---------- detail ---------- */
+.detail{padding:6px 16px 22px}
+.dhead{display:flex;align-items:center;gap:8px;margin:2px 0 10px}
+.back{border:0;background:var(--hair);border-radius:10px;padding:7px 11px;font-size:12.5px;font-weight:750;color:var(--ink-2);cursor:pointer}
+.pill{font-size:11px;font-weight:750;padding:5px 10px;border-radius:var(--r-pill);background:var(--hair);color:#475569}
+.pill.free{background:#e7f7f0;color:#0b7a52}
+.pill.few{background:#fdf3df;color:#96650a}
+.pill.full{background:#fdeaea;color:#b91c1c}
+.pill.closed,.pill.unknown{background:var(--hair);color:var(--muted)}
+.star{
+  margin-left:auto;width:36px;height:36px;border:0;border-radius:10px;background:var(--hair);
+  font-size:16px;color:var(--idle);cursor:pointer;line-height:1;
+}
+.star.on{color:#e8a400;background:#fdf3df}
+.dtitle{font-size:19px;font-weight:760;line-height:1.3;margin:0 0 4px}
+.dsub{font-size:12.5px;color:var(--muted);line-height:1.5}
+.big{display:flex;align-items:flex-end;gap:8px;margin:15px 0 9px}
+.big .n{font-size:44px;font-weight:800;line-height:.95;font-variant-numeric:tabular-nums;color:var(--idle)}
+.big .n.free{color:var(--free)}.big .n.few{color:var(--few)}.big .n.full{color:var(--full)}
+.big .of{font-size:14px;color:var(--muted);padding-bottom:5px}
+.big .lbl{margin-left:auto;font-size:11.5px;color:var(--muted);padding-bottom:6px;text-align:right;line-height:1.4}
+.bar{height:8px;border-radius:var(--r-pill);background:#eef2f7;overflow:hidden;margin:0 0 14px}
+.bar i{display:block;height:100%;border-radius:var(--r-pill);background:var(--free)}
+.bar i.few{background:var(--few)}.bar i.full{background:var(--full)}
+.kv{display:grid;grid-template-columns:78px 1fr;gap:9px 10px;font-size:13px;line-height:1.55;margin:12px 0 4px}
+.kv dt{color:var(--muted);font-size:12px}
+.kv dd{margin:0}
+.acts{display:flex;gap:8px;margin-top:16px}
+.acts a,.acts button{
+  flex:1;display:flex;align-items:center;justify-content:center;gap:6px;text-decoration:none;
+  border:0;border-radius:var(--r-md);padding:13px;font-size:13.5px;font-weight:750;cursor:pointer;
+  background:var(--ink);color:#fff;
+}
+.acts .ghost{background:var(--hair);color:var(--ink)}
+.note{
+  font-size:11px;color:var(--faint);line-height:1.65;margin-top:15px;
+  border-top:1px dashed var(--line);padding-top:10px;
+}
+
+/* ---------- map markers ---------- */
+.pk{
+  width:34px;height:34px;border-radius:11px;display:grid;place-items:center;
+  font-size:12.5px;font-weight:800;color:#fff;background:var(--idle);
+  border:2px solid #fff;box-shadow:0 2px 8px rgba(15,23,42,.3);
+  font-variant-numeric:tabular-nums;
+}
+.pk.free{background:var(--free)}.pk.few{background:var(--few)}.pk.full{background:var(--full)}
+.pk.closed,.pk.unknown{background:var(--idle)}
+.pk.txt{font-size:11px;letter-spacing:-.2px}
+.pk-closed{
+  width:16px;height:16px;border-radius:50%;background:#94a3b8;
+  border:2px solid #fff;box-shadow:0 1px 4px rgba(15,23,42,.3);
+}
+.cl{
+  position:absolute;left:0;top:0;transform:translate(-50%,-50%);
+  white-space:nowrap;border-radius:13px;padding:5px 9px;
+  background:rgba(15,23,42,.88);color:#fff;text-align:center;
+  border:2px solid #fff;box-shadow:0 3px 10px rgba(15,23,42,.28);line-height:1.15;
+}
+.cl b{display:block;font-size:13px;font-weight:800;font-variant-numeric:tabular-nums}
+.cl span{display:block;font-size:9.5px;opacity:.75}
+.cl.good{background:rgba(14,159,110,.95)}
+.cl.mid{background:rgba(232,164,0,.95)}
+.cl.bad{background:rgba(224,36,36,.95)}
+
+/* ---------- desktop ---------- */
+@media(min-width:900px){
+  :root{--sheet:0px}
+  #top{right:auto;width:420px;top:16px}
+  #sheet{
+    left:auto;right:0;top:0;bottom:0;width:400px;height:auto;border-radius:0;
+    box-shadow:-10px 0 28px rgba(15,23,42,.10);padding-top:var(--safe-t);
+  }
+  #sheet.tall{height:auto}
+  .grab{display:none}
+  #legend{left:auto;right:412px;bottom:16px}
+  #banner{right:auto;width:420px}
+  .leaflet-control-zoom{margin-bottom:16px!important}
+}
+@media(prefers-reduced-motion:reduce){
+  #sheet{transition:none}
+  .live.busy i{animation:none}
+}
+</style>
+</head>
+<body>
+
+<div id="map" role="application" aria-label="香港泊車空位地圖"></div>
+
+<header id="top">
+  <div class="brand">
+    <span class="logo" aria-hidden="true">泊</span>
+    <div class="bt">
+      <b>泊車易</b>
+      <small id="hdr">載入泊車數據…</small>
+    </div>
+    <button class="live" id="refresh" title="重新整理" aria-label="重新整理泊車數據">
+      <i></i><span id="liveTxt">連線中</span>
+    </button>
+  </div>
+
+  <div class="searchrow">
+    <label class="qwrap">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true">
+        <circle cx="11" cy="11" r="7"></circle><path d="M20 20l-3.6-3.6"></path>
+      </svg>
+      <input id="q" type="search" inputmode="search" enterkeyhint="search" placeholder="搜尋停車場、街道、地區"
+             autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="搜尋停車場或街道">
+    </label>
+    <button class="iconbtn" id="loc" title="用我的位置" aria-label="用我的位置">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="6.5"></circle><circle cx="12" cy="12" r="1.8" fill="currentColor" stroke="none"></circle>
+        <path d="M12 2v3M12 19v3M2 12h3M19 12h3"></path>
+      </svg>
+    </button>
+  </div>
+
+  <div class="chips" role="group" aria-label="圖層及篩選">
+    <button class="chip on" data-k="parks">停車場</button>
+    <button class="chip on" data-k="meters">咪錶位</button>
+    <button class="chip" data-k="onlyFree">只有空位</button>
+    <button class="chip" data-k="fav">★ 收藏</button>
+  </div>
+</header>
+
+<div id="banner" role="status" aria-live="polite"></div>
+
+<div id="legend">
+  <span><i style="background:#0e9f6e"></i>有空位</span>
+  <span><i style="background:#e8a400"></i>車位緊張</span>
+  <span><i style="background:#e02424"></i>已滿</span>
+  <span><i style="background:#94a3b8"></i>無資料</span>
+</div>
+
+<section id="sheet" aria-label="泊車列表">
+  <button class="grab" id="grab" aria-label="展開或收起列表"><span></span></button>
+  <div class="tabs">
+    <button class="tab on" data-tab="parks">停車場 <b id="nParks">–</b></button>
+    <button class="tab" data-tab="meters">咪錶位 <b id="nMeters">–</b></button>
+    <div class="stamp" id="stamp"></div>
+  </div>
+  <div id="list"><div class="empty">正在載入泊車數據…</div></div>
+</section>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+(function(){
+'use strict';
+
+/* ============================================================
+   1. 設定
+   ============================================================ */
+const CFG = {
+  VACANCY : 'https://api.data.gov.hk/v1/carpark-info-vacancy?data=vacancy&lang=zh_TW',
+  INFO    : 'https://api.data.gov.hk/v1/carpark-info-vacancy?data=info&lang=zh_TW',
+  METERS  : 'data/meters.json',
+  OCC     : 'https://resource.data.one.gov.hk/td/psiparkingspaces/occupancystatus/occupancystatus.csv',
+  HK      : [22.34, 114.15],
+  REFRESH_VAC  : 60e3,        // 停車場空位：每分鐘
+  REFRESH_OCC  : 300e3,       // 咪錶佔用：每五分鐘
+  TTL_INFO     : 12*3600e3,   // 靜態資料快取
+  TTL_VAC      : 24*3600e3,   // 空位快照快取（離線時用）
+  STALE_AFTER  : 45*60e3,     // 超過即標示為舊資料
+  LIST_CAP     : 60,
+  TILE         : 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'
+};
+
+/* 運輸署「營運時段」代碼 → 人話 */
+const OPS = {
+  A:'星期一至六 08:00–24:00（星期日及公眾假期除外）',
+  '3A':'星期一至六 08:00–24:00（星期日及公眾假期除外）',
+  B:'星期一至六 08:00–20:00（星期日及公眾假期除外）',
+  '3B':'星期一至六 08:00–20:00（星期日及公眾假期除外）',
+  D:'星期一至六 08:00–24:00；星期日及假期 10:00–22:00',
+  '3D':'星期一至六 08:00–24:00；星期日及假期 10:00–22:00',
+  G:'每日 07:00–19:00',
+  '3G':'每日 07:00–19:00',
+  H:'每日 08:00–20:00',
+  '3H':'每日 08:00–20:00',
+  J:'每日 08:00–24:00',
+  '4J':'每日 08:00–24:00',
+  '7J':'每日 08:00–24:00',
+  N:'每日 19:00–24:00',
+  '4N':'每日 19:00–24:00',
+  P:'星期一至六 08:00–20:00（星期日不准泊車）',
+  Q:'星期一至六 08:00–20:00；星期日及假期 10:00–22:00',
+  '4Q':'星期一至六 08:00–20:00；星期日及假期 10:00–22:00',
+  S:'平日 17:00–24:00；星期六 08:00–24:00；星期日及假期 10:00–22:00',
+  T:'平日 17:30–24:00；星期六 08:00–24:00；星期日及假期 10:00–22:00'
+};
+const VTS = {A:'私家車 / 客貨車', a:'私家車 / 客貨車', G:'貨車', C:'旅遊巴'};
+
+/* ============================================================
+   2. 小工具
+   ============================================================ */
+const $  = (s, r=document) => r.querySelector(s);
+const $$ = (s, r=document) => Array.prototype.slice.call(r.querySelectorAll(s));
+const esc = v => String(v == null ? '' : v).replace(/[&<>"']/g,
+  c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const num = n => n == null ? '–' : Number(n).toLocaleString('en-HK');
+const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+
+/* 'YYYY-MM-DD HH:MM:SS'（香港時間）→ epoch ms */
+function hkMs(str){
+  const m = /(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/.exec(str || '');
+  return m ? Date.UTC(+m[1], +m[2]-1, +m[3], +m[4]-8, +m[5], +m[6]) : 0;
+}
+/* 'MM/DD/YYYY hh:mm:ss AM'（香港時間）→ epoch ms */
+function usMs(str){
+  const m = /(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2}):(\d{2})\s*(AM|PM)?/i.exec(str || '');
+  if(!m) return 0;
+  let hh = +m[4] % 12;
+  if((m[7] || '').toUpperCase() === 'PM') hh += 12;
+  return Date.UTC(+m[3], +m[1]-1, +m[2], hh-8, +m[5], +m[6]);
+}
+function hhmm(ms){                                    // 顯示用香港時間
+  if(!ms) return '';
+  return new Date(ms + 8*3600e3).toISOString().slice(11, 16);
+}
+function ago(ms){
+  if(!ms) return '';
+  const min = Math.round(Math.max(0, Date.now() - ms) / 60000);
+  if(min < 1) return '剛剛';
+  if(min < 60) return min + ' 分鐘';
+  const h = Math.floor(min/60);
+  if(h < 24) return h + ' 小時';
+  const d = Math.floor(h/24);
+  return d < 30 ? d + ' 日' : (d/30).toFixed(0) + ' 個月';
+}
+function distM(a, b){                                 // 米
+  const R = 6371000, r = Math.PI/180;
+  const dLat = (b[0]-a[0])*r, dLng = (b[1]-a[1])*r;
+  const x = Math.sin(dLat/2)**2 + Math.cos(a[0]*r)*Math.cos(b[0]*r)*Math.sin(dLng/2)**2;
+  return 2*R*Math.asin(Math.sqrt(x));
+}
+function distTxt(m){
+  if(m == null) return '';
+  return m < 1000 ? Math.round(m/10)*10 + ' m' : (m/1000).toFixed(1) + ' km';
+}
+
+/* ============================================================
+   3. 狀態
+   ============================================================ */
+const S = {
+  info   : new Map(),      // park_Id -> 靜態資料
+  parks  : [],             // 已整合空位的停車場
+  meters : [],             // 咪錶（由 meters.json）
+  vacRaw : null,           // 最近一次取得的原始空位資料
+  occ    : new Map(),      // spaceId -> {s:'V'|'O', t:epoch, meter:'N'|'NU'}
+  pos    : null,
+  tab    : 'parks',
+  q      : '',
+  show   : {parks:true, meters:true},
+  onlyFree:false,
+  favOnly :false,
+  fav    : loadFav(),
+  sel    : null,
+  ts     : {info:0, vac:0, occ:0, meters:0},
+  busy   : {},
+  errors : {}
+};
+
+function loadFav(){
+  try{
+    const a = JSON.parse(localStorage.getItem('pe.fav.v1') || '[]');
+    return new Set(Array.isArray(a) ? a : []);
+  }catch(e){ return new Set(); }
+}
+function saveFav(){
+  try{ localStorage.setItem('pe.fav.v1', JSON.stringify([...S.fav])); }catch(e){}
+}
+
+/* ============================================================
+   4. 資料來源
+   ============================================================ */
+async function getJSON(url){
+  const r = await fetch(url, {cache:'no-store'});
+  if(!r.ok) throw new Error(url + ' → HTTP ' + r.status);
+  return r.json();
+}
+async function getText(url){
+  const r = await fetch(url, {cache:'no-store'});
+  if(!r.ok) throw new Error(url + ' → HTTP ' + r.status);
+  return r.text();
+}
+function readCache(key, ttl){
+  try{
+    const c = JSON.parse(localStorage.getItem(key) || 'null');
+    if(c && c.t && Date.now() - c.t < ttl && c.d) return c;
+  }catch(e){}
+  return null;
+}
+function writeCache(key, d){
+  try{ localStorage.setItem(key, JSON.stringify({t:Date.now(), d:d})); }catch(e){}
+}
+
+/* 靜態資料只保留畫面上會用的欄位，方便存入 localStorage */
+function trimInfo(x){
+  const pc = x.privateCar || {};
+  const h  = (x.openingHours || [])[0] || null;
+  return {
+    id  : x.park_Id,
+    name: x.name || '',
+    addr: x.displayAddress || '',
+    dist: x.district || '',
+    lat : x.latitude || 0,
+    lng : x.longitude || 0,
+    hours: h ? (h.periodStart === '00:00' && h.periodEnd === '24:00' ? '24 小時'
+                : (h.periodStart || '') + '–' + (h.periodEnd || '')) : '',
+    total: pc.space || null,
+    fee  : (pc.hourlyCharges || [])[0] || null,
+    height: ((x.heightLimits || [])[0] || {}).height || null,
+    site : x.website || '',
+    phone: x.contactNo || '',
+    ev   : (x.facilities || []).indexOf('evCharger') >= 0,
+    dis  : (x.facilities || []).indexOf('disabilities') >= 0,
+    open : x.opening_status || ''
+  };
+}
+
+async function loadInfo(){
+  const c = readCache('pe.info.v2', CFG.TTL_INFO);
+  if(c){ applyInfo(c.d); S.ts.info = c.t; return; }
+  const j = await getJSON(CFG.INFO);
+  const list = (j.results || j).map(trimInfo).filter(x => x.id && x.lat);
+  applyInfo(list);
+  writeCache('pe.info.v2', list);
+  S.ts.info = Date.now();
+}
+function applyInfo(list){
+  S.info.clear();
+  list.forEach(x => S.info.set(x.id, x));
+  /* 空位資料可能比靜態資料早到：有需要就重新整合一次 */
+  if(S.vacRaw && S.vacRaw.length && !S.parks.length){
+    buildParks(S.vacRaw);
+    if($('#nParks')) render();
+  }
+}
+async function loadVacancy(){
+  const j = await getJSON(CFG.VACANCY);
+  const list = j.results || j;
+  S.vacRaw = list;
+  writeCache('pe.vac.v2', list);
+  S.ts.vac = Date.now();
+  buildParks(list);
+}
+async function loadMeters(){
+  const j = await getJSON(CFG.METERS);
+  const f = j.fields;
+  S.meters = j.rows.map(r => {
+    const o = {};
+    for(let i=0;i<f.length;i++) o[f[i]] = r[i];
+    return o;
+  });
+  S.ts.meters = Date.now();
+  $('#nMeters').textContent = num(S.meters.length);
+}
+async function loadOccupancy(){
+  const text = await getText(CFG.OCC);
+  const lines = text.split(/\r?\n/);
+  const map = new Map();
+  for(let i=1;i<lines.length;i++){
+    if(!lines[i]) continue;
+    const c = lines[i].split(',');
+    if(c.length < 4 || !c[0]) continue;
+    map.set(c[0], {meter:c[1], s:c[2], t:usMs(c[3])});
+  }
+  if(map.size < 1000) throw new Error('咪錶佔用資料不完整（' + map.size + ' 行）');
+  S.occ = map;
+  S.ts.occ = Date.now();
+}
+
+/* ============================================================
+   5. 整合：停車場空位
+   ============================================================ */
+function buildParks(vacList){
+  const out = [];
+  vacList.forEach(v => {
+    const info = S.info.get(v.park_Id);
+    if(!info || !info.lat) return;
+    const pc   = (v.privateCar || [])[0] || null;
+    const type = pc ? pc.vacancy_type : null;          // A=有實數 B=只有有位/冇位 C=停用
+    /* 注意：opening_status 成日都係 CLOSED 但有實時空位（162 個場），
+       所以只有 vacancy_type 'C' 才算真正停用 */
+    const closed = type === 'C';
+    let vac = null, avail = null;
+    if(pc && type === 'A' && typeof pc.vacancy === 'number' && pc.vacancy >= 0){
+      vac = pc.vacancy;
+      avail = vac > 0 ? 'yes' : 'no';
+    }else if(pc && type === 'B'){
+      avail = pc.vacancy === 1 ? 'yes' : 'no';         // 營辦商只提供「有位/冇位」
+    }
+    const updated = pc ? hkMs(pc.lastupdate) : 0;
+    const p = {
+      kind:'park', id:info.id, name:info.name || '未命名停車場', addr:info.addr,
+      district:info.dist, lat:info.lat, lng:info.lng,
+      total:info.total, vac:vac, avail:avail, closed:closed, type:type,
+      updated:updated, stale:!!updated && Date.now() - updated > CFG.STALE_AFTER,
+      hours:info.hours, fee:info.fee, height:info.height,
+      site:info.site, phone:info.phone, ev:info.ev, dis:info.dis
+    };
+    p.status = parkStatus(p);
+    out.push(p);
+  });
+  out.sort((a,b) => a.name.localeCompare(b.name, 'zh-Hant'));
+  S.parks = out;
+}
+
+function parkStatus(p){
+  if(p.closed) return 'closed';
+  if(p.vac != null){
+    if(p.vac === 0) return 'full';
+    if((p.total && p.vac / p.total >= 0.15) || p.vac >= 15) return 'free';
+    return 'few';
+  }
+  if(p.avail === 'yes') return 'free';
+  if(p.avail === 'no')  return 'full';
+  return 'unknown';
+}
+const STATUS_TXT = {
+  free:'有空位', few:'車位緊張', full:'已滿', closed:'暫停開放', unknown:'無實時數據'
+};
+
+/* ============================================================
+   6. 地圖
+   ============================================================ */
+const map = L.map('map', {
+  center: CFG.HK, zoom: 12, zoomControl:false, preferCanvas:true,
+  attributionControl:true, tap:true
+});
+L.tileLayer(CFG.TILE, {
+  maxZoom: 19, subdomains: 'abc',
+  attribution: '&copy; OpenStreetMap contributors ｜ 數據：data.gov.hk、運輸署'
+}).addTo(map);
+L.control.zoom({position:'bottomright'}).addTo(map);
+
+/* 咪錶先加、停車場後加：停車場標記要疊喺咪錶上面 */
+const meterLayer = L.layerGroup().addTo(map);
+const parkLayer  = L.layerGroup().addTo(map);
+const canvasRenderer = L.canvas({padding:.35});
+let userLayer = null;
+
+/* ---------- 停車場標記 ---------- */
+function closedIcon(){
+  return L.divIcon({
+    className:'', iconSize:[16,16], iconAnchor:[8,8],
+    html:'<div class="pk-closed"></div>'
+  });
+}
+function parkIcon(p){
+  const st = p.status;
+  let label;
+  if(st === 'closed') label = '關';
+  else if(st === 'unknown') label = '?';
+  else if(p.vac === 0) label = '滿';
+  else if(p.vac != null) label = p.vac > 999 ? '999+' : String(p.vac);
+  else label = '有位';
+  const cls = 'pk ' + st + (label.length > 2 ? ' txt' : '');
+  return L.divIcon({
+    className:'', iconSize:[34,34], iconAnchor:[17,17],
+    html:'<div class="' + cls + '">' + esc(label) + '</div>'
+  });
+}
+function clusterIcon(freeSpaces, count, freeParks){
+  const ratio = count ? freeParks / count : 0;
+  const cls = freeParks === 0 ? 'bad' : ratio >= 0.5 ? 'good' : 'mid';
+  return L.divIcon({
+    className:'', iconSize:[0,0], iconAnchor:[0,0],
+    html:'<div class="cl ' + cls + '"><b>' + freeSpaces + ' 位</b><span>' + count + ' 個場</span></div>'
+  });
+}
+
+function renderParksOnMap(){
+  parkLayer.clearLayers();
+  if(!S.show.parks) return;
+  const z = map.getZoom(), b = map.getBounds();
+  let list = S.parks.filter(parkMatch);
+  if(S.onlyFree) list = list.filter(p => p.vac > 0 || (p.vac == null && p.avail === 'yes'));
+  if(S.favOnly)  list = list.filter(p => S.fav.has(p.id));
+  list = list.filter(p => b.contains([p.lat, p.lng]));
+
+  if(z < 14){                                  // 遠景：按格聚合
+    const cells = new Map(), CELL = 96;
+    list.forEach(p => {
+      const pt = map.project([p.lat, p.lng], z);
+      const k = Math.floor(pt.x/CELL) + ':' + Math.floor(pt.y/CELL);
+      let c = cells.get(k);
+      if(!c){ c = {n:0, v:0, f:0, x:0, y:0}; cells.set(k, c); }
+      c.n++; c.x += p.lat; c.y += p.lng;
+      if(p.vac > 0){ c.v += p.vac; c.f++; }
+    });
+    cells.forEach(c => {
+      const mk = L.marker([c.x/c.n, c.y/c.n], {icon:clusterIcon(c.v, c.n, c.f), keyboard:false});
+      mk.on('click', () => map.flyTo(mk.getLatLng(), Math.min(16, z + 2), {duration:.5}));
+      parkLayer.addLayer(mk);
+    });
+    return;
+  }
+  list.forEach(p => {
+    const mk = L.marker([p.lat, p.lng], {
+      icon: p.status === 'closed' ? closedIcon() : parkIcon(p),
+      title: p.name, keyboard:false, riseOnHover:true, bubblingMouseEvents:false
+    });
+    mk.on('click', () => showPark(p, {fly:false}));
+    parkLayer.addLayer(mk);
+  });
+}
+
+/* ---------- 咪錶標記 ---------- */
+function meterVisible(){
+  const b = map.getBounds();
+  return S.meters.filter(m => {
+    if(m.lat < b.getSouth() || m.lat > b.getNorth() || m.lng < b.getWest() || m.lng > b.getEast()) return false;
+    const o = S.occ.get(m.id);
+    if(!o || o.meter === 'NU') return false;
+    if(S.onlyFree && o.s !== 'V') return false;
+    if(S.q && !meterMatch(m)) return false;
+    return true;
+  });
+}
+
+function renderMetersOnMap(){
+  meterLayer.clearLayers();
+  if(!S.show.meters || !S.meters.length) return;
+  const z = map.getZoom();
+  if(z < 16) return;                           // 街景級先顯示咪錶點，遠景會太密
+  const vis = meterVisible();
+
+  const CAP = 5000, step = vis.length > CAP ? vis.length/CAP : 1;
+  for(let i = 0; i < vis.length; i += step){
+    const m = vis[Math.floor(i)];
+    const free = S.occ.get(m.id).s === 'V';
+    meterLayer.addLayer(L.circleMarker([m.lat, m.lng], {
+      renderer: canvasRenderer, radius: 6, weight: 1.3, color:'#fff',
+      fillColor: free ? '#0e9f6e' : '#e02424', fillOpacity:.95, interactive:false
+    }));
+  }
+}
+
+function syncLayers(){
+  /* remove→add 令停車場層永遠喺咪錶層之上 */
+  map.removeLayer(parkLayer);
+  S.show.meters ? map.addLayer(meterLayer) : map.removeLayer(meterLayer);
+  if(S.show.parks) map.addLayer(parkLayer);
+  renderParksOnMap();
+  renderMetersOnMap();
+}
+
+/* ============================================================
+   7. 篩選
+   ============================================================ */
+function norm(s){ return String(s || '').toLowerCase(); }
+function parkMatch(p){
+  if(!S.q) return true;
+  return norm(p.name + ' ' + p.addr + ' ' + p.district).indexOf(norm(S.q)) >= 0;
+}
+function meterMatch(m){
+  if(!S.q) return true;
+  return norm(m.street + ' ' + m.section + ' ' + m.district + ' ' + m.id).indexOf(norm(S.q)) >= 0;
+}
+
+/* ============================================================
+   8. 列表
+   ============================================================ */
+function stamp(){
+  const t = Math.max(S.ts.vac, S.ts.occ);
+  $('#stamp').innerHTML = t
+    ? '更新 ' + hhmm(t) + '<br>' + (S.pos ? '已定位' : '未定位')
+    : '　';
+}
+
+/* 列表重繪時保留滾動位置；內容無變就唔重建 DOM */
+let listSig = '';
+function paintList(sig, html){
+  if(sig === listSig && $('#list').querySelector('.row')) return;
+  listSig = sig;
+  const el = $('#list'), st = el.scrollTop;
+  el.innerHTML = html;
+  el.scrollTop = st;
+}
+function render(){
+  $('#nParks').textContent  = S.parks.length ? num(S.parks.length) : '–';
+  $('#nMeters').textContent = S.meters.length ? num(S.meters.length) : '–';
+  if(S.parks.length || S.meters.length){
+    $('#hdr').textContent = num(S.parks.length) + ' 個停車場 · ' + num(S.meters.length) + ' 個咪錶位';
+  }
+  renderParksOnMap();
+  renderMetersOnMap();
+  stamp();
+  if(S.sel) return;
+  S.tab === 'parks' ? renderParkList() : renderMeterList();
+}
+
+function sortedParks(){
+  let list = S.parks.filter(parkMatch);
+  if(S.onlyFree) list = list.filter(p => p.vac > 0 || (p.vac == null && p.avail === 'yes'));
+  if(S.favOnly)  list = list.filter(p => S.fav.has(p.id));
+  if(S.pos){
+    const pos = [S.pos.lat, S.pos.lng];
+    return list
+      .map(p => ({p:p, d:distM(pos, [p.lat, p.lng])}))
+      .sort((a, b) => a.d - b.d);
+  }
+  return list
+    .slice()
+    .sort((a, b) => (b.vac || 0) - (a.vac || 0))
+    .map(p => ({p:p, d:null}));
+}
+
+function renderParkList(){
+  const rows = sortedParks().slice(0, CFG.LIST_CAP);
+  if(!rows.length){
+    listSig = '';
+    $('#list').innerHTML = '<div class="empty">冇符合嘅停車場<br><small>試下清除搜尋，或者關閉篩選</small>'
+      + (S.q ? '<br><button class="linkbtn" data-goto="meters">睇下咪錶位有冇結果 →</button>' : '')
+      + '</div>';
+    return;
+  }
+  const title = S.q ? '搜尋結果' : S.favOnly ? '★ 收藏' : S.pos ? '最近的停車場' : '空位最多的停車場';
+  const html = '<div class="secttl">' + title + '</div>' + rows.map((it, i) => {
+    const p = it.p, st = p.status;
+    let right;
+    if(p.vac != null){
+      right = '<b>' + num(p.vac) + '</b><small>' + (p.total ? '/ ' + num(p.total) : '空位') + '</small>';
+    }else if(p.avail === 'yes'){
+      right = '<b>有位</b><small>未有數字</small>';
+    }else{
+      right = '<b>' + (st === 'closed' ? '關閉' : '無資料') + '</b><small>&nbsp;</small>';
+    }
+    const meta = [p.district || '—'];
+    if(it.d != null) meta.push(distTxt(it.d));
+    if(p.stale) meta.push('資料舊');
+    if(S.fav.has(p.id) && !S.favOnly) meta.push('★');
+    return '<button class="row" data-i="' + i + '" data-kind="park">'
+      + '<span class="dot ' + st + '"></span>'
+      + '<span class="main"><b>' + esc(p.name) + '</b><small>' + esc(meta.join(' · ')) + '</small></span>'
+      + '<span class="vac ' + st + '">' + right + '</span></button>';
+  }).join('');
+  S._parkRows = rows;
+  paintList('p|' + title + '|' + rows.map(it => it.p.id + ':' + it.p.vac + ':' + it.p.status).join(','), html);
+}
+
+function meterGroups(){
+  const g = new Map();
+  /* 冇定位就用而家地圖中心做參考，列表先會同畫面相關 */
+  const ref = S.pos ? [S.pos.lat, S.pos.lng] : [map.getCenter().lat, map.getCenter().lng];
+  S.meters.forEach(m => {
+    if(!meterMatch(m)) return;
+    const o = S.occ.get(m.id);
+    if(!o || o.meter === 'NU') return;
+    if(S.onlyFree && o.s !== 'V') return;
+    const key = m.district + '|' + m.street + '|' + m.section;
+    let x = g.get(key);
+    if(!x){
+      x = {street:m.street, section:m.section, district:m.district, n:0, v:0,
+           lat:m.lat, lng:m.lng, best:Infinity};
+      g.set(key, x);
+    }
+    x.n++;
+    if(o.s === 'V'){
+      x.v++;
+      const d = distM(ref, [m.lat, m.lng]);
+      if(d < x.best){ x.best = d; x.lat = m.lat; x.lng = m.lng; }
+    }
+  });
+  return [...g.values()]
+    .map(x => ({x:x, d: x.v ? x.best : distM(ref, [x.lat, x.lng])}))
+    .sort((a, b) => (b.x.v > 0) - (a.x.v > 0) || a.d - b.d)
+    .map(o => ({street:o.x.street, section:o.x.section, district:o.x.district,
+                n:o.x.n, v:o.x.v, lat:o.x.lat, lng:o.x.lng, d:o.d}));
+}
+
+function renderMeterList(){
+  if(!S.ts.occ){
+    $('#list').innerHTML = '<div class="empty">正在讀取咪錶佔用狀況…</div>';
+    refreshOccupancy();
+    return;
+  }
+  const arr = meterGroups().slice(0, CFG.LIST_CAP);
+  if(!arr.length){
+    listSig = '';
+    $('#list').innerHTML = '<div class="empty">冇符合嘅咪錶位<br><small>試下清除搜尋，或者關閉篩選</small>'
+      + (S.q ? '<br><button class="linkbtn" data-goto="parks">睇下停車場有冇結果 →</button>' : '')
+      + '</div>';
+    return;
+  }
+  const html = '<div class="secttl">按街道分組 · 空置 / 總數</div>' + arr.map((x, i) => {
+    const st = x.v === 0 ? 'full' : (x.v / x.n >= 0.3 ? 'free' : 'few');
+    return '<button class="row" data-i="' + i + '" data-kind="meter">'
+      + '<span class="dot ' + st + '"></span>'
+      + '<span class="main"><b>' + esc(x.street) + (x.section ? '（' + esc(x.section) + '）' : '') + '</b>'
+      + '<small>' + esc(x.district) + ' · ' + x.n + ' 個咪錶位'
+      + (x.d != null ? ' · ' + distTxt(x.d) : '') + '</small></span>'
+      + '<span class="vac ' + st + '"><b>' + x.v + '</b><small>/ ' + x.n + '</small></span></button>';
+  }).join('');
+  S._meterRows = arr;
+  paintList('m|' + arr.map(x => x.district + x.street + x.section + ':' + x.v + '/' + x.n + ':' + Math.round(x.d || 0)).join(','), html);
+}
+
+/* ============================================================
+   9. 詳情
+   ============================================================ */
+function feeTxt(fee){
+  if(!fee || fee.price == null) return '';
+  const unit = fee.type === 'half-hourly' ? '半小時' : '小時';
+  return '$' + fee.price + ' / ' + unit;
+}
+
+function starBtn(p){
+  return '<button class="star ' + (S.fav.has(p.id) ? 'on' : '') + '" id="star" data-id="' + esc(p.id) + '" aria-label="'
+    + (S.fav.has(p.id) ? '取消收藏' : '加入收藏') + '">' + (S.fav.has(p.id) ? '★' : '☆') + '</button>';
+}
+
+function showPark(p, opt){
+  opt = opt || {};
+  S.sel = {kind:'park', data:p};
+  listSig = '';
+  const st = p.status;
+  const pct = (p.total && p.vac != null) ? clamp(Math.round(p.vac / p.total * 100), 0, 100) : null;
+  const d = S.pos ? distM([S.pos.lat, S.pos.lng], [p.lat, p.lng]) : null;
+  const nav = 'https://www.google.com/maps/dir/?api=1&destination=' + p.lat + ',' + p.lng;
+
+  let big;
+  if(p.vac != null){
+    big = '<div class="big"><span class="n ' + st + '">' + num(p.vac) + '</span>'
+        + (p.total ? '<span class="of">/ ' + num(p.total) + ' 個車位</span>' : '<span class="of">個空位</span>')
+        + '<span class="lbl">' + (p.updated ? '更新 ' + ago(p.updated) + '前' : '') + '</span></div>';
+  }else if(p.avail === 'yes'){
+    big = '<div class="big"><span class="n ' + st + '">有位</span>'
+        + '<span class="lbl">營辦商未提供數字<br>' + (p.updated ? '更新 ' + ago(p.updated) + '前' : '') + '</span></div>';
+  }else{
+    big = '<div class="big"><span class="n ' + st + '">—</span>'
+        + '<span class="lbl">' + (st === 'closed' ? '暫停開放' : '營辦商未提供空位') + '</span></div>';
+  }
+
+  const kv = [
+    ['地址', esc(p.addr || '—')],
+    ['地區', esc(p.district || '—')],
+    p.hours ? ['開放時間', esc(p.hours)] : null,
+    p.fee  ? ['時租', esc(feeTxt(p.fee))] : null,
+    p.height ? ['高度限制', p.height + ' 米'] : null,
+    (p.ev || p.dis) ? ['設施', [p.ev ? '電動車充電' : '', p.dis ? '傷健車位' : ''].filter(Boolean).join('、')] : null,
+    d != null ? ['距離', distTxt(d)] : null,
+    p.phone ? ['電話', '<a href="tel:' + esc(p.phone.replace(/\s/g, '')) + '">' + esc(p.phone) + '</a>'] : null
+  ].filter(Boolean);
+
+  $('#list').innerHTML = '<div class="detail">'
+    + '<div class="dhead"><button class="back" id="back">‹ 返回</button>'
+      + '<span class="pill ' + st + '">' + STATUS_TXT[st] + '</span>'
+      + (S.show.parks ? starBtn(p) : '') + '</div>'
+    + '<h2 class="dtitle">' + esc(p.name) + '</h2>'
+    + '<div class="dsub">' + esc(p.addr || '') + '</div>'
+    + big
+    + (pct != null ? '<div class="bar"><i class="' + st + '" style="width:' + pct + '%"></i></div>' : '<div style="height:2px"></div>')
+    + '<dl class="kv">' + kv.map(kvRow).join('') + '</dl>'
+    + '<div class="acts">'
+      + '<a href="' + nav + '" target="_blank" rel="noopener">導航前往</a>'
+      + (p.site ? '<a class="ghost" href="' + esc(p.site) + '" target="_blank" rel="noopener">停車場網站</a>'
+                : '<button class="ghost" id="centre">放大地圖</button>')
+    + '</div>'
+    + '<div class="note">空位數字由停車場營辦商提供，經 data.gov.hk 更新'
+      + (p.stale ? '；此場最後更新已超過 45 分鐘，數字可能不準。' : '。')
+      + (p.total ? '' : '（此場未公開總車位數）') + '</div>'
+    + '</div>';
+
+  $('#list').scrollTop = 0;
+  $('#sheet').classList.add('tall');
+  if(!opt.fly) map.flyTo([p.lat, p.lng], Math.max(map.getZoom(), 16), {duration:.6});
+}
+
+function showMeter(m, opt){
+  opt = opt || {};
+  S.sel = {kind:'meter', data:m};
+  listSig = '';
+  const o = S.occ.get(m.id) || {s:'?'};
+  const free = o.s === 'V';
+  const st = free ? 'free' : 'full';
+  const elapsedMin = o.t ? Math.floor(Math.max(0, Date.now() - o.t) / 60000) : null;
+  const hourly = (m.price && m.unit) ? m.price * 60 / m.unit : null;
+  const d = S.pos ? distM([S.pos.lat, S.pos.lng], [m.lat, m.lng]) : null;
+  const nav = 'https://www.google.com/maps/dir/?api=1&destination=' + m.lat + ',' + m.lng;
+
+  const body = free
+    ? '<div class="big"><span class="n free">有位</span>'
+      + '<span class="lbl">' + (elapsedMin == null ? '' :
+          elapsedMin < 2 ? '剛剛空出' : '約 ' + elapsedMin + ' 分鐘前空出') + '</span></div>'
+    : '<div class="big"><span class="n full">已泊</span>'
+      + (elapsedMin != null ? '<span class="of">' + (elapsedMin < 60 ? elapsedMin + ' 分鐘' : (elapsedMin/60).toFixed(1) + ' 小時') + '</span>' : '')
+      + '<span class="lbl">' + (m.lpp ? '上限 ' + m.lpp + ' 分鐘' : '') + '</span></div>'
+      + (m.lpp && elapsedMin != null
+          ? '<div class="bar"><i class="' + (elapsedMin >= m.lpp ? 'full' : 'few') + '" style="width:'
+            + clamp(elapsedMin / m.lpp * 100, 0, 100) + '%"></i></div>'
+          : '');
+
+  const kv = [
+    ['位置', esc(m.street) + (m.section ? '<br><span style="color:#64748b">近 ' + esc(m.section) + '</span>' : '')],
+    ['地區', esc(m.region) + ' · ' + esc(m.district)],
+    ['車位編號', '<b>' + esc(m.id) + '</b>'],
+    ['車輛類型', esc(VTS[m.vt] || m.vt || '—')],
+    ['收費', '$' + m.price + ' / ' + m.unit + ' 分鐘' + (hourly ? '（約 $' + hourly.toFixed(0) + ' / 小時）' : '')],
+    ['最長泊車', m.lpp ? m.lpp + ' 分鐘' : '—'],
+    m.op ? ['營運時段', esc(OPS[m.op] || m.op)] : null,
+    d != null ? ['距離', distTxt(d)] : null
+  ].filter(Boolean);
+
+  $('#list').innerHTML = '<div class="detail">'
+    + '<div class="dhead"><button class="back" id="back">‹ 返回</button>'
+      + '<span class="pill ' + st + '">' + (free ? '空置' : o.s === 'O' ? '已佔用' : '狀態未明') + '</span></div>'
+    + '<h2 class="dtitle">' + esc(m.street) + (m.section ? ' · ' + esc(m.section) : '') + '</h2>'
+    + '<div class="dsub">咪錶位 ' + esc(m.id) + '</div>'
+    + body
+    + '<dl class="kv">' + kv.map(kvRow).join('') + '</dl>'
+    + '<div class="acts"><a href="' + nav + '" target="_blank" rel="noopener">導航前往</a>'
+      + '<button class="ghost" id="centre">放大地圖</button></div>'
+    + '<div class="note">' + (free
+        ? '「有位」由咪錶感測器偵測，最後狀態：' + (o.t ? ago(o.t) + '前' : '—') + '。'
+        : '開放數據只提供「佔用/空置」，唔會顯示實際剩餘泊車時間（要睇「入錶易」）。上面「已泊」時間＝感測器偵測到佔用至今，只作估算。')
+      + '</div></div>';
+
+  $('#list').scrollTop = 0;
+  $('#sheet').classList.add('tall');
+  if(!opt.fly) map.flyTo([m.lat, m.lng], Math.max(map.getZoom(), 17), {duration:.5});
+}
+
+function kvRow(pair){
+  return '<dt>' + pair[0] + '</dt><dd>' + pair[1] + '</dd>';
+}
+
+function backToList(){
+  S.sel = null;
+  listSig = '';
+  $('#sheet').classList.remove('tall');
+  render();
+}
+
+/* ============================================================
+   10. 連線狀態
+   ============================================================ */
+function setLive(state, text){
+  const el = $('#refresh');
+  el.className = 'live' + (state ? ' ' + state : '');
+  $('#liveTxt').textContent = text;
+}
+let bannerTimer = null;
+function banner(msg){
+  const el = $('#banner');
+  clearTimeout(bannerTimer);
+  if(!msg){ el.classList.remove('show'); return; }
+  el.textContent = msg;
+  el.classList.add('show');
+  bannerTimer = setTimeout(() => el.classList.remove('show'), 9000);
+}
+
+async function refreshVacancy(force){
+  if(S.busy.vac) return;
+  S.busy.vac = true;
+  if(!S.parks.length) setLive('busy', '載入中');
+  try{
+    await loadVacancy();
+    S.errors.vac = false;
+    banner('');
+    setLive('', navigator.onLine ? '已更新 ' + hhmm(S.ts.vac) : '離線');
+    render();
+  }catch(e){
+    S.errors.vac = true;
+    setLive(S.parks.length ? 'stale' : 'err', S.parks.length ? '舊資料' : '離線');
+    banner('停車場空位更新失敗' + (S.parks.length ? '，顯示最後一次取得嘅數據。' : '，請檢查網絡後重試。'));
+  }finally{
+    S.busy.vac = false;
+    stamp();
+  }
+}
+
+async function refreshOccupancy(force){
+  if(S.busy.occ) return;
+  S.busy.occ = true;
+  try{
+    await loadOccupancy();
+    S.errors.occ = false;
+    renderMetersOnMap();
+    if(S.sel && S.sel.kind === 'meter') showMeter(S.sel.data, {fly:true});
+    else if(S.tab === 'meters' && !S.sel) renderMeterList();
+    stamp();
+  }catch(e){
+    S.errors.occ = true;
+    if(!S.occ.size) banner('咪錶佔用資料暫時取不到，其餘功能不受影響。');
+  }finally{
+    S.busy.occ = false;
+  }
+}
+
+/* ============================================================
+   11. 互動
+   ============================================================ */
+/* 列表點擊（事件委派） */
+$('#list').addEventListener('click', e => {
+  const back = e.target.closest('#back');
+  if(back){ backToList(); return; }
+
+  const star = e.target.closest('#star');
+  if(star && S.sel && S.sel.kind === 'park'){
+    const id = S.sel.data.id;
+    S.fav.has(id) ? S.fav.delete(id) : S.fav.add(id);
+    saveFav();
+    star.classList.toggle('on', S.fav.has(id));
+    star.textContent = S.fav.has(id) ? '★' : '☆';
+    star.setAttribute('aria-label', S.fav.has(id) ? '取消收藏' : '加入收藏');
+    setFavChip();
+    return;
+  }
+
+  const centre = e.target.closest('#centre');
+  if(centre && S.sel){
+    const d = S.sel.data;
+    map.flyTo([d.lat, d.lng], 17, {duration:.5});
+    $('#sheet').classList.remove('tall');
+    return;
+  }
+
+  const goto = e.target.closest('[data-goto]');
+  if(goto){
+    const k = goto.dataset.goto;
+    const tab = $('.tab[data-tab="' + k + '"]');
+    if(tab) tab.click();
+    return;
+  }
+
+  const row = e.target.closest('.row');
+  if(!row) return;
+  const i = +row.dataset.i;
+  if(row.dataset.kind === 'park'){
+    const it = (S._parkRows || [])[i];
+    if(it) showPark(it.p, {fly:true});
+  }else{
+    const x = (S._meterRows || [])[i];
+    if(x){
+      map.flyTo([x.lat, x.lng], 17, {duration:.6});
+      $('#sheet').classList.remove('tall');
+    }
+  }
+});
+
+/* 分頁 */
+$$('.tab').forEach(t => t.addEventListener('click', () => {
+  if(S.tab === t.dataset.tab) return;
+  S.tab = t.dataset.tab;
+  $$('.tab').forEach(x => x.classList.toggle('on', x === t));
+  S.sel = null;
+  listSig = '';
+  $('#list').scrollTop = 0;
+  $('#sheet').classList.remove('tall');
+  if(S.tab === 'meters'){
+    if(!S.ts.occ){ renderMeterList(); refreshOccupancy(); }
+    else renderMeterList();
+    if(!S.show.meters){ S.show.meters = true; setChip('meters', true); syncLayers(); }
+  }else{
+    renderParkList();
+  }
+}));
+
+/* 篩選 chips */
+function setChip(k, on){
+  const c = $('.chip[data-k="' + k + '"]');
+  if(c) c.classList.toggle('on', on);
+}
+function setFavChip(){
+  const c = $('.chip[data-k="fav"]');
+  if(!c) return;
+  c.classList.toggle('avail', S.fav.size > 0);
+  if(!S.fav.size){ S.favOnly = false; c.classList.remove('on'); }
+}
+$$('.chip').forEach(c => c.addEventListener('click', () => {
+  const k = c.dataset.k;
+  if(k === 'parks' || k === 'meters'){
+    S.show[k] = !S.show[k];
+    c.classList.toggle('on', S.show[k]);
+    syncLayers();
+    return;
+  }
+  if(k === 'onlyFree'){
+    S.onlyFree = !S.onlyFree;
+    c.classList.toggle('on', S.onlyFree);
+  }
+  if(k === 'fav'){
+    S.favOnly = !S.favOnly;
+    c.classList.toggle('on', S.favOnly);
+  }
+  S.sel = null;
+  render();
+}));
+
+/* 搜尋 */
+let qTimer = null;
+$('#q').addEventListener('input', e => {
+  const v = e.target.value;
+  clearTimeout(qTimer);
+  qTimer = setTimeout(() => {
+    S.q = v.trim();
+    S.sel = null;
+    render();
+    if(S.q.length >= 2) focusOnMatches();
+  }, 140);
+});
+$('#q').addEventListener('keydown', e => {
+  if(e.key === 'Enter'){ e.preventDefault(); e.target.blur(); focusOnMatches(); }
+});
+
+function focusOnMatches(){
+  const pts = [];
+  if(S.tab === 'parks'){
+    S.parks.filter(parkMatch).slice(0, 300).forEach(p => pts.push([p.lat, p.lng]));
+  }else{
+    S.meters.filter(meterMatch).slice(0, 800).forEach(m => pts.push([m.lat, m.lng]));
+  }
+  if(!pts.length) return;
+  if(pts.length === 1){ map.flyTo(pts[0], 17, {duration:.5}); return; }
+  map.fitBounds(L.latLngBounds(pts).pad(.18), {maxZoom: 16, animate:true});
+}
+
+/* 定位 */
+$('#loc').addEventListener('click', locate);
+function locate(){
+  if(!navigator.geolocation){ banner('此瀏覽器唔支援定位。'); return; }
+  const btn = $('#loc');
+  btn.classList.add('on');
+  navigator.geolocation.getCurrentPosition(pos => {
+    const p = {lat:pos.coords.latitude, lng:pos.coords.longitude};
+    S.pos = p;
+    if(userLayer) map.removeLayer(userLayer);
+    userLayer = L.layerGroup([
+      L.circleMarker([p.lat, p.lng], {radius:9, color:'#2563eb', weight:3, fillColor:'#2563eb', fillOpacity:1})
+        .bindPopup('你嘅位置'),
+      L.circle([p.lat, p.lng], {radius: Math.max(60, pos.coords.accuracy || 0),
+        color:'#2563eb', weight:1, opacity:.3, fillOpacity:.06})
+    ]).addTo(map);
+    map.flyTo([p.lat, p.lng], 16, {duration:.8});
+    stamp();
+    if(!S.sel) render();
+  }, err => {
+    btn.classList.remove('on');
+    banner('未能取得位置：' + (err.code === 1 ? '請在瀏覽器設定允許定位。' : '請檢查網絡或 GPS。'));
+  }, {enableHighAccuracy:true, timeout:12000, maximumAge:60000});
+}
+
+/* 拖動把手 */
+$('#grab').addEventListener('click', () => $('#sheet').classList.toggle('tall'));
+
+/* 重新整理 */
+$('#refresh').addEventListener('click', () => {
+  setLive('busy', '更新中');
+  refreshVacancy(true);
+  if(S.show.meters) refreshOccupancy(true);
+});
+
+/* 點地圖空白處：就近揀咪錶位 */
+map.on('click', e => {
+  if(!S.show.meters || map.getZoom() < 16 || !S.occ.size) return;
+  const z = map.getZoom();
+  const pt = map.project(e.latlng, z);
+  const b = map.getBounds();
+  let best = null, bestD = 30;
+  for(const m of S.meters){
+    if(m.lat < b.getSouth() || m.lat > b.getNorth() || m.lng < b.getWest() || m.lng > b.getEast()) continue;
+    const o = S.occ.get(m.id);
+    if(!o || o.meter === 'NU') continue;
+    if(S.q && !meterMatch(m)) continue;
+    const q = map.project([m.lat, m.lng], z);
+    const d = Math.abs(q.x - pt.x) + Math.abs(q.y - pt.y);
+    if(d < bestD){ bestD = d; best = m; }
+  }
+  if(best) showMeter(best);
+});
+
+let moveTimer = null;
+map.on('moveend zoomend', () => {
+  renderParksOnMap();
+  clearTimeout(moveTimer);
+  moveTimer = setTimeout(renderMetersOnMap, 140);
+});
+
+/* 回到前景：按需要更新 */
+document.addEventListener('visibilitychange', () => {
+  if(document.visibilityState !== 'visible') return;
+  if(Date.now() - S.ts.vac > 90e3) refreshVacancy();
+  if(S.show.meters && Date.now() - S.ts.occ > 120e3) refreshOccupancy();
+});
+window.addEventListener('online',  () => { if(S.errors.vac) refreshVacancy(); });
+window.addEventListener('offline', () => setLive('err', '離線'));
+
+/* ============================================================
+   12. 起動
+   ============================================================ */
+window.__pe = {S:S, map:map, showPark:showPark, showMeter:showMeter, render:render};
+
+async function boot(){
+  setFavChip();
+
+  /* 先用快取畫面（離線都睇得到上次資料） */
+  const cInfo = readCache('pe.info.v2', CFG.TTL_INFO);
+  const cVac  = readCache('pe.vac.v2', CFG.TTL_VAC);
+  if(cInfo && cVac){
+    S.vacRaw = cVac.d;
+    applyInfo(cInfo.d);
+    buildParks(cVac.d);
+    S.ts.info = cInfo.t;
+    S.ts.vac  = cVac.t;
+    render();
+    setLive('stale', '顯示 ' + hhmm(cVac.t) + ' 資料');
+  }
+
+  /* 一定要靜態資料先，空位資料才知道對應邊個場 */
+  try{ await loadInfo(); }catch(e){ S.errors.info = true; }
+  try{ await loadVacancy(); }catch(e){ S.errors.vac = true; }
+  try{ await loadMeters(); }catch(e){ S.errors.meters = true; }
+  render();
+
+  if(!S.parks.length && !S.meters.length){
+    banner('連接唔到開放數據，請檢查網絡後重新整理。');
+    setLive('err', '離線');
+    $('#list').innerHTML = '<div class="empty">載入失敗<br><small>請檢查網絡連線</small></div>';
+    return;
+  }
+  if(!S.errors.vac && !S.errors.info) setLive(navigator.onLine ? '' : 'err', navigator.onLine ? '已更新 ' + hhmm(Date.now()) : '離線');
+
+  if(S.show.meters) refreshOccupancy();
+
+  setInterval(() => {
+    if(document.visibilityState === 'visible') refreshVacancy();
+  }, CFG.REFRESH_VAC);
+  setInterval(() => {
+    if(S.show.meters && document.visibilityState === 'visible') refreshOccupancy();
+  }, CFG.REFRESH_OCC);
+}
+
+boot();
+})();
+</script>
+</body>
+</html>

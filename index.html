@@ -130,8 +130,17 @@ a{color:var(--accent)}
   transition:height .28s var(--ease);will-change:height;
 }
 #sheet.tall{height:82vh;height:82dvh}
-.grab{flex:none;padding:9px 0 3px;display:grid;place-items:center;cursor:pointer;border:0;background:transparent;width:100%}
-.grab span{width:38px;height:4px;border-radius:4px;background:#cbd5e1}
+.grab{
+  flex:none;display:grid;place-items:center;width:100%;height:44px;padding:0;
+  border:0;background:transparent;cursor:pointer;color:#7b8794;
+}
+.grab svg{width:28px;height:28px;fill:currentColor;transition:transform .25s var(--ease)}
+.grab:active{color:var(--ink-2)}
+#sheet.collapsed{height:44px;border-radius:var(--r-lg) var(--r-lg) 0 0}
+#sheet.collapsed .tabs,#sheet.collapsed #list{display:none}
+#sheet.collapsed .grab svg{transform:rotate(180deg)}
+body.sheet-collapsed #legend{bottom:54px}
+body.sheet-collapsed .leaflet-control-zoom{margin-bottom:56px!important}
 .tabs{flex:none;display:flex;align-items:center;gap:4px;padding:2px 12px 8px;border-bottom:1px solid var(--line)}
 .tab{
   border:0;background:transparent;border-radius:9px;padding:6px 9px;cursor:pointer;
@@ -240,6 +249,10 @@ a{color:var(--accent)}
     box-shadow:-10px 0 28px rgba(15,23,42,.10);padding-top:var(--safe-t);
   }
   #sheet.tall{height:auto}
+  #sheet.collapsed{height:auto}
+  #sheet.collapsed .tabs{display:flex}
+  #sheet.collapsed #list{display:block}
+  #sheet.collapsed .grab svg{transform:none}
   .grab{display:none}
   #legend{left:auto;right:412px;bottom:16px}
   #banner{right:auto;width:420px}
@@ -301,7 +314,9 @@ a{color:var(--accent)}
 </div>
 
 <section id="sheet" aria-label="泊車列表">
-  <button class="grab" id="grab" aria-label="展開或收起列表"><span></span></button>
+  <button class="grab" id="grab" aria-label="收起詳情" aria-expanded="true">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16.5 4.8 8h14.4z"/></svg>
+  </button>
   <div class="tabs">
     <button class="tab on" data-tab="parks">停車場 <b id="nParks">–</b></button>
     <button class="tab" data-tab="meters">咪錶位 <b id="nMeters">–</b></button>
@@ -932,6 +947,7 @@ function showPark(p, opt){
     + '</div>';
 
   $('#list').scrollTop = 0;
+  setCollapsed(false);
   $('#sheet').classList.add('tall');
   if(!opt.fly) map.flyTo([p.lat, p.lng], Math.max(map.getZoom(), 16), {duration:.6});
 }
@@ -986,6 +1002,7 @@ function showMeter(m, opt){
       + '</div></div>';
 
   $('#list').scrollTop = 0;
+  setCollapsed(false);
   $('#sheet').classList.add('tall');
   if(!opt.fly) map.flyTo([m.lat, m.lng], Math.max(map.getZoom(), 17), {duration:.5});
 }
@@ -997,6 +1014,7 @@ function kvRow(pair){
 function backToList(){
   S.sel = null;
   listSig = '';
+  setCollapsed(false);
   $('#sheet').classList.remove('tall');
   render();
 }
@@ -1115,6 +1133,7 @@ $$('.tab').forEach(t => t.addEventListener('click', () => {
   $$('.tab').forEach(x => x.classList.toggle('on', x === t));
   S.sel = null;
   listSig = '';
+  setCollapsed(false);
   $('#list').scrollTop = 0;
   $('#sheet').classList.remove('tall');
   if(S.tab === 'meters'){
@@ -1210,8 +1229,20 @@ function locate(){
   }, {enableHighAccuracy:true, timeout:12000, maximumAge:60000});
 }
 
-/* 拖動把手 */
-$('#grab').addEventListener('click', () => $('#sheet').classList.toggle('tall'));
+/* 三角形把手：詳情頁可以整塊收起，列表頁切換高低 */
+function setCollapsed(on){
+  const sh = $('#sheet'), g = $('#grab');
+  sh.classList.toggle('collapsed', on);
+  document.body.classList.toggle('sheet-collapsed', on);
+  g.setAttribute('aria-expanded', on ? 'false' : 'true');
+  g.setAttribute('aria-label', on ? '展開面板' : S.sel ? '收起詳情' : '展開列表');
+}
+$('#grab').addEventListener('click', () => {
+  const sh = $('#sheet');
+  if(sh.classList.contains('collapsed')){ setCollapsed(false); return; }
+  if(S.sel){ setCollapsed(true); return; }
+  sh.classList.toggle('tall');
+});
 
 /* 重新整理 */
 $('#refresh').addEventListener('click', () => {
@@ -1251,6 +1282,9 @@ document.addEventListener('visibilitychange', () => {
   if(document.visibilityState !== 'visible') return;
   if(Date.now() - S.ts.vac > 90e3) refreshVacancy();
   if(S.show.meters && Date.now() - S.ts.occ > 120e3) refreshOccupancy();
+});
+window.addEventListener('resize', () => {
+  if(window.innerWidth >= 900 && $('#sheet').classList.contains('collapsed')) setCollapsed(false);
 });
 window.addEventListener('online',  () => { if(S.errors.vac) refreshVacancy(); });
 window.addEventListener('offline', () => setLive('err', '離線'));

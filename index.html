@@ -905,7 +905,8 @@ function renderMetersOnMap(){
       const r = meterRemain(m);
       if(r == null) continue;
       const rr = Math.max(0, r);                  // 超時顯示 0
-      if(z < 18 && rr > 10) continue;             // 17 級只標最快 10 分鐘內到期或已超時
+      if(z < 18 && (rr <= 0 || rr > 10)) continue;   // 17 級只標 10 分鐘內到期；超時的 0 留到跟其他數字一齊出現
+
       cand.push([rr, m.id]);
     }
     cand.sort((a, b) => a[0] - b[0]);

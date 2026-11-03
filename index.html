@@ -1379,12 +1379,12 @@ async function refreshVacancy(force){
     await loadVacancy();
     S.errors.vac = false;
     banner('');
-    setLive('', navigator.onLine ? '已更新 ' + hhmm(S.ts.vac) : '離線');
+    setLive('', '更新 ' + hhmm(S.ts.vac));
     render();
   }catch(e){
+    /* 唔彈訊息，只保留最後更新時間；圓點轉顏色表示未更新成功 */
     S.errors.vac = true;
-    setLive(S.parks.length ? 'stale' : 'err', S.parks.length ? '舊資料' : '離線');
-    banner('停車場空位更新失敗' + (S.parks.length ? '，顯示最後一次取得嘅數據。' : '，請檢查網絡後重試。'));
+    setLive(S.ts.vac ? 'stale' : 'err', S.ts.vac ? '更新 ' + hhmm(S.ts.vac) : '—');
   }finally{
     S.busy.vac = false;
     stamp();
@@ -1404,7 +1404,6 @@ async function refreshOccupancy(force){
     stamp();
   }catch(e){
     S.errors.occ = true;
-    if(!S.occ.size) banner('咪錶佔用資料暫時取不到，其餘功能不受影響。');
   }finally{
     S.busy.occ = false;
   }
@@ -1679,7 +1678,7 @@ window.addEventListener('resize', () => {
   else applySheet();
 });
 window.addEventListener('online',  () => { if(S.errors.vac) refreshVacancy(); });
-window.addEventListener('offline', () => setLive('err', '離線'));
+window.addEventListener('offline', () => { if(!S.ts.vac) setLive('err', '—'); });
 
 /* ============================================================
    12. 起動
@@ -1717,12 +1716,11 @@ async function boot(){
   render();
 
   if(!S.parks.length && !S.meters.length){
-    banner('連接唔到開放數據，請檢查網絡後重新整理。');
-    setLive('err', '離線');
+    setLive('err', '—');
     $('#list').innerHTML = '<div class="empty">載入失敗<br><small>請檢查網絡連線</small></div>';
     return;
   }
-  if(!S.errors.vac && !S.errors.info) setLive(navigator.onLine ? '' : 'err', navigator.onLine ? '已更新 ' + hhmm(Date.now()) : '離線');
+  if(!S.errors.vac && !S.errors.info) setLive('', '更新 ' + hhmm(Date.now()));
 
   if(S.show.meters) refreshOccupancy();
 

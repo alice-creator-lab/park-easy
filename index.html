@@ -238,7 +238,7 @@ a{color:var(--accent)}
   width:16px;height:16px;border-radius:50%;background:#94a3b8;
   border:2px solid #fff;box-shadow:0 1px 4px rgba(15,23,42,.3);
 }
-/* 補充停車場（冇實時空位）：空心圈 */
+/* 補充停車場（無實時空位）：空心圓圈 */
 .po{
   width:18px;height:18px;border-radius:50%;background:#fff;
   border:3px solid #5b6b7c;box-shadow:0 0 0 2px rgba(255,255,255,.9), 0 1px 5px rgba(15,23,42,.35);
@@ -255,7 +255,7 @@ a{color:var(--accent)}
 }
 .cl b{display:block;font-size:13px;font-weight:800;font-variant-numeric:tabular-nums}
 .cl span{display:block;font-size:9.5px;opacity:.75}
-/* 有實時數字嘅補充場：細小數字牌，方便同政府場分開 */
+/* 有實時數字的補充停車場：小型數字標記，以便與政府停車場區分 */
 .pk2{
   position:absolute;left:0;top:0;transform:translate(-50%,-50%);
   display:flex;align-items:baseline;gap:2px;white-space:nowrap;
@@ -502,7 +502,7 @@ function saveFav(){
 /* ============================================================
    4. 資料來源
    ============================================================ */
-/* no-cache（唔係 no-store）：有 ETag 就回 304，內容冇變時 0 bytes */
+/* no-cache（而非 no-store）：有 ETag 便回 304，內容未變時 0 bytes */
 async function getJSON(url){
   const r = await fetch(url, {cache:'no-cache'});
   if(!r.ok) throw new Error(url + ' → HTTP ' + r.status);
@@ -600,7 +600,7 @@ async function loadOccupancy(){
   S.ts.occ = Date.now();
 }
 
-/* 補充資料：人手查核嘅停車場 + OpenStreetMap 停車場（兩者都冇實時空位） */
+/* 補充資料：人手查核的停車場 + OpenStreetMap 停車場（兩者均無實時空位） */
 async function loadOthers(){
   const got = await Promise.allSettled([getJSON(CFG.EXTRA), getJSON(CFG.OSM)]);
   const ex = got[0].status === 'fulfilled' ? got[0].value : null;
@@ -650,7 +650,7 @@ function applyLive(){
   });
 }
 
-/* 實時數字嘅顏色分級（同政府場一致） */
+/* 實時數字的顏色分級（與政府停車場一致） */
 function vacClass(n, cap){
   if(n == null) return 'unknown';
   if(n === 0) return 'full';
@@ -796,7 +796,7 @@ function renderParksOnMap(){
   });
 }
 
-/* ---------- 其他停車場（冇實時空位） ---------- */
+/* ---------- 其他停車場（無實時空位） ---------- */
 function otherMatch(o){
   if(!S.q) return false;
   return norm(o.name + ' ' + (o.addr || '')).indexOf(norm(S.q)) >= 0;
@@ -820,7 +820,7 @@ function renderOthersOnMap(){
   const z = map.getZoom(), b = map.getBounds();
   S.others.forEach(o => {
     const hit = otherMatch(o);
-    /* 有實時數字嘅場（信和系）任何 zoom 都畫；其餘灰圈要街景級，免得滿地雜點 */
+    /* 有實時數字的停車場（信和系）在任何縮放級別均會顯示；其餘灰色圓圈須達街景級別，以免畫面雜亂 */
     if(!hit && o.vac == null && z < 16) return;
     if(!b.contains([o.lat, o.lng])) return;
     const mk = L.marker([o.lat, o.lng], {
@@ -896,7 +896,7 @@ function stamp(){
     : '　';
 }
 
-/* 列表重繪時保留滾動位置；內容無變就唔重建 DOM */
+/* 列表重繪時保留滾動位置；內容未變則不重建 DOM */
 let listSig = '';
 function paintList(sig, html){
   if(sig === listSig && $('#list').querySelector('.row')) return;
@@ -938,7 +938,7 @@ function sortedParks(){
 function otherRowsList(){
   if(S.q) return S.others.filter(otherMatch).slice(0, 15);
   if(!S.pos) return [];
-  /* 有定位但冇搜尋：列出 600 米內、無實時數據嘅場 */
+  /* 有定位但無搜尋：列出 600 米內、無實時數據的停車場 */
   const pos = [S.pos.lat, S.pos.lng];
   return S.others
     .map(o => ({o:o, d:distM(pos, [o.lat, o.lng])}))
@@ -1008,7 +1008,7 @@ function renderParkList(){
 
 function meterGroups(){
   const g = new Map();
-  /* 冇定位就用而家地圖中心做參考，列表先會同畫面相關 */
+  /* 沒有定位時以目前地圖中心作參考，列表才會與畫面相關 */
   const ref = S.pos ? [S.pos.lat, S.pos.lng] : [map.getCenter().lat, map.getCenter().lng];
   S.meters.forEach(m => {
     if(!meterMatch(m)) return;
@@ -1044,7 +1044,7 @@ function meterGroups(){
                 minRem:o.x.minRem == null ? null : o.x.minRem}));
 }
 
-/* 已泊嘅錶位：最快幾時有位（用佔用開始時間 + 上限推算） */
+/* 已泊的咪錶位：最快何時有車位（以佔用開始時間 + 上限推算） */
 function meterTip(x){
   if(x.v > 0) return '';
   if(x.minRem != null) return '最快 ' + Math.max(1, Math.ceil(x.minRem)) + ' 分鐘後有車位';
@@ -1325,7 +1325,7 @@ function banner(msg){
 ['touchstart', 'mousedown', 'keydown', 'wheel'].forEach(ev =>
   window.addEventListener(ev, () => { S.lastAct = Date.now(); }, {passive:true}));
 
-/* ---------- 只更新「畫面睇得到」嘅資料，慳流量 ---------- */
+/* ---------- 只更新「畫面可見」的資料，節省流量 ---------- */
 function viewStats(){
   const b = map.getBounds();
   let parks = 0, others = 0, live = 0;
@@ -1382,7 +1382,7 @@ async function refreshVacancy(force){
     setLive('', '更新 ' + hhmm(S.ts.vac));
     render();
   }catch(e){
-    /* 唔彈訊息，只保留最後更新時間；圓點轉顏色表示未更新成功 */
+    /* 不彈出訊息，只保留最後更新時間；圓點轉色表示更新未成功 */
     S.errors.vac = true;
     setLive(S.ts.vac ? 'stale' : 'err', S.ts.vac ? '更新 ' + hhmm(S.ts.vac) : '—');
   }finally{
@@ -1548,7 +1548,7 @@ function focusOnMatches(){
     S.meters.filter(meterMatch).slice(0, 800).forEach(m => pts.push([m.lat, m.lng]));
   }
   if(!pts.length) return;
-  /* 下面 sheet 佔住畫面，fitBounds 要避開，唔係結果會藏喺面板後面 */
+  /* 下方 sheet 佔據畫面，fitBounds 須避開，否則結果會藏於面板後 */
   const pad = sheetPad();
   map.fitBounds(L.latLngBounds(pts).pad(pts.length === 1 ? 0 : .18),
     {maxZoom: pts.length === 1 ? 17 : 16, animate:true, paddingBottomRight:[0, pad]});
@@ -1579,7 +1579,7 @@ function locate(){
   }, {enableHighAccuracy:true, timeout:12000, maximumAge:60000});
 }
 
-/* ---------- 面板高度：一律用 px，Safari 唔會同 vh/dvh 打架 ---------- */
+/* ---------- 面板高度：一律使用 px，Safari 不會與 vh/dvh 衝突 ---------- */
 const COLLAPSED_H = 44;
 const UI = {collapsed:false, tall:false};
 
@@ -1594,7 +1594,7 @@ function applySheet(){
     document.documentElement.style.setProperty('--sheet', '0px');
     return;
   }
-  /* 底部安全區（iPhone home indicator）唔可以食咗細條本身嘅高度 */
+  /* 底部安全區（iPhone home indicator）不可佔用細條本身的高度 */
   const safe = parseFloat(getComputedStyle(sh).paddingBottom) || 0;
   const h = UI.collapsed ? COLLAPSED_H + safe : Math.round(viewportH() * (UI.tall ? 0.82 : 0.46));
   sh.style.height = h + 'px';
@@ -1694,7 +1694,7 @@ async function boot(){
   window.addEventListener('resize', applySheet);
   if(window.visualViewport) window.visualViewport.addEventListener('resize', applySheet);
 
-  /* 先用快取畫面（離線都睇得到上次資料） */
+  /* 先顯示快取畫面（離線時仍可看到上次資料） */
   const cInfo = readCache('pe.info.v2', CFG.TTL_INFO);
   const cVac  = readCache('pe.vac.v2', CFG.TTL_VAC);
   if(cInfo && cVac){
@@ -1738,7 +1738,7 @@ async function boot(){
   setInterval(() => {
     if(document.visibilityState === 'visible') refreshLive();
   }, CFG.REFRESH_LIVE);
-  /* 倒數每 30 秒更新一次，唔需要再抓資料 */
+  /* 倒數每 30 秒更新一次，無須重新抓取資料 */
   setInterval(() => {
     if(document.visibilityState !== 'visible') return;
     if(S.sel && S.sel.kind === 'meter'){

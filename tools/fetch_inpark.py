@@ -93,7 +93,7 @@ def main():
         "v": 1,
         "generated": datetime.now(HKT).replace(microsecond=0).isoformat(),
         "source": "InPark AI car-park pages (liveVacancy), data from Sino S+ car park system",
-        "note": "第三方聚合，非政府開放數據；只抽取 liveVacancy 物件。",
+        "note": "第三方聚合資料，並非政府開放數據；只抽取 liveVacancy 物件。",
         "count": ok,
         "rows": rows,
     }

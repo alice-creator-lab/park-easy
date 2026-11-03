@@ -1,6 +1,6 @@
 {
  "v": 2,
- "note": "政府開放數據冇收錄嘅停車場。inpark 欄 = InPark AI 個場 id，有值就由 tools/fetch_inpark.py 抓實時空位（信和商場 S+ 系統）；冇值就只有位置資料。收費／電話逐個查官網，checked 見下。",
+ "note": "政府開放數據未收錄的停車場。`inpark` 欄目指向 InPark AI 的停車場 id；若填有值，會由 tools/fetch_inpark.py 抓取實時空位（信和商場 S+ 系統）；未填則只有位置資料。收費及電話逐個查核官網，查核日期見 checked。",
  "checked": "2026-11-03",
  "fields": [
   "id",

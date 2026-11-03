@@ -182,6 +182,18 @@
    "fee": "$60 / 小時（最少一小時）；23:01–07:00 $18 / 小時",
    "site": "https://ifc.com.hk/tc/mall/parking/",
    "ev": null
+  },
+  {
+   "id": "ylp",
+   "inpark": "",
+   "name": "元朗廣場停車場",
+   "lat": 22.44495,
+   "lng": 114.02403,
+   "addr": "元朗青山公路元朗段249-251號（港鐵朗屏站）",
+   "tel": "",
+   "fee": "星期一至五 $24 / 小時；星期六、日及公眾假期 $28 / 小時（2026-11-03 查核）",
+   "site": "https://www.yuenlongplaza.com/parking/",
+   "ev": true
   }
  ]
 }

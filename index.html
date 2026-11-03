@@ -1404,7 +1404,7 @@ function showOther(o, opt){
       + '此停車場未納入政府開放數據。收費資料查核日期 2026-11-03。'
     : o.src === 'curated'
     ? '此停車場未納入政府開放數據，亦未能找到實時空位數字；上表資料來自' + esc(o.source || '營辦商網站') +
-      '（查核日期 2026-11-03），建議先致電確認。'
+      '（查核日期 2026-11-03）；' + (o.tel ? '建議先致電確認。' : '建議出發前查看停車場網站。')
     : '位置資料來自 OpenStreetMap（© OpenStreetMap contributors，ODbL）。此停車場不提供實時空位數字，收費及開放時間亦可能不齊全。';
 
   $('#list').innerHTML = '<div class="detail">'
@@ -1419,7 +1419,7 @@ function showOther(o, opt){
           + '<div class="fresh">' + (o.mins != null ? o.mins + ' 分鐘前更新' : '實時更新')
           + ' · 信和商場 S+ 系統（經 InPark AI）</div>'
         : '<div class="big"><span class="n unknown txt">無實時數據</span>'
-          + '<span class="lbl">不代表沒有車位<br>建議先致電確認</span></div>')
+          + '<span class="lbl">不代表沒有車位<br>' + (o.tel ? '建議先致電確認' : '建議先查看停車場網站') + '</span></div>')
     + (kv.length ? '<dl class="kv">' + kv.map(kvRow).join('') + '</dl>' : '')
     + '<div class="acts"><a href="' + nav + '" target="_blank" rel="noopener">導航前往</a>'
       + (o.site ? '<a class="ghost" href="' + esc(o.site) + '" target="_blank" rel="noopener">停車場網站</a>'

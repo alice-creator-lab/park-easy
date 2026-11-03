@@ -125,6 +125,7 @@ a{color:var(--accent)}
 /* ---------- bottom sheet ---------- */
 #sheet{
   position:fixed;left:0;right:0;bottom:0;z-index:700;background:var(--card);
+  touch-action:manipulation;
   border-radius:var(--r-xl) var(--r-xl) 0 0;box-shadow:0 -8px 28px rgba(15,23,42,.14);
   height:var(--sheet);display:flex;flex-direction:column;padding-bottom:var(--safe-b);
   transition:height .28s var(--ease);will-change:height;
@@ -133,10 +134,11 @@ a{color:var(--accent)}
 .grab{
   flex:none;display:grid;place-items:center;width:100%;height:44px;padding:0;
   border:0;background:transparent;cursor:pointer;color:#7b8794;
+  touch-action:manipulation;            /* 擋 iOS 雙擊放大 */
 }
 .grab svg{width:28px;height:28px;fill:currentColor;transition:transform .25s var(--ease)}
 .grab:active{color:var(--ink-2)}
-#sheet.collapsed{height:44px;border-radius:var(--r-lg) var(--r-lg) 0 0;overflow:hidden}
+#sheet.collapsed{border-radius:var(--r-lg) var(--r-lg) 0 0;overflow:hidden}
 #sheet.collapsed .tabs,#sheet.collapsed #list{display:none}
 #sheet.collapsed .grab svg{transform:rotate(180deg)}
 .gtxt{position:absolute;left:14px;top:0;height:44px;display:flex;align-items:center;
@@ -1246,7 +1248,9 @@ function applySheet(){
     document.documentElement.style.setProperty('--sheet', '0px');
     return;
   }
-  const h = UI.collapsed ? COLLAPSED_H : Math.round(viewportH() * (UI.tall ? 0.82 : 0.46));
+  /* 底部安全區（iPhone home indicator）唔可以食咗細條本身嘅高度 */
+  const safe = parseFloat(getComputedStyle(sh).paddingBottom) || 0;
+  const h = UI.collapsed ? COLLAPSED_H + safe : Math.round(viewportH() * (UI.tall ? 0.82 : 0.46));
   sh.style.height = h + 'px';
   sh.style.overflow = UI.collapsed ? 'hidden' : '';
   document.documentElement.style.setProperty('--sheet', h + 'px');

@@ -197,6 +197,7 @@ a{color:var(--accent)}
 .big{display:flex;align-items:flex-end;gap:8px;margin:15px 0 9px}
 .big .n{font-size:44px;font-weight:800;line-height:.95;font-variant-numeric:tabular-nums;color:var(--idle)}
 .big .n.free{color:var(--free)}.big .n.few{color:var(--few)}.big .n.full{color:var(--full)}
+.big .n.txt{font-size:26px;line-height:1.2;letter-spacing:-.2px;color:var(--muted);font-weight:750}
 .big .of{font-size:14px;color:var(--muted);padding-bottom:5px}
 .big .lbl{margin-left:auto;font-size:11.5px;color:var(--muted);padding-bottom:6px;text-align:right;line-height:1.4}
 .bar{height:8px;border-radius:var(--r-pill);background:#eef2f7;overflow:hidden;margin:0 0 14px}
@@ -231,6 +232,12 @@ a{color:var(--accent)}
   width:16px;height:16px;border-radius:50%;background:#94a3b8;
   border:2px solid #fff;box-shadow:0 1px 4px rgba(15,23,42,.3);
 }
+/* 補充停車場（冇實時空位）：空心圈 */
+.po{
+  width:18px;height:18px;border-radius:50%;background:#fff;
+  border:3px solid #5b6b7c;box-shadow:0 0 0 2px rgba(255,255,255,.9), 0 1px 5px rgba(15,23,42,.35);
+}
+.po.hit{border-color:var(--accent);background:#e6f4f6}
 .cl{
   position:absolute;left:0;top:0;transform:translate(-50%,-50%);
   white-space:nowrap;border-radius:13px;padding:5px 9px;
@@ -341,6 +348,8 @@ const CFG = {
   VACANCY : 'https://api.data.gov.hk/v1/carpark-info-vacancy?data=vacancy&lang=zh_TW',
   INFO    : 'https://api.data.gov.hk/v1/carpark-info-vacancy?data=info&lang=zh_TW',
   METERS  : 'data/meters.json',
+  EXTRA   : 'data/parks_extra.json',      // 人手補充（官網查核）
+  OSM     : 'data/parks_osm.json',        // OpenStreetMap 停車場
   OCC     : 'https://resource.data.one.gov.hk/td/psiparkingspaces/occupancystatus/occupancystatus.csv',
   HK      : [22.34, 114.15],
   REFRESH_VAC  : 60e3,        // 停車場空位：每分鐘
@@ -432,6 +441,9 @@ const S = {
   info   : new Map(),      // park_Id -> 靜態資料
   parks  : [],             // 已整合空位的停車場
   meters : [],             // 咪錶（由 meters.json）
+  extra  : [],             // 人手補充停車場（冇實時空位）
+  osmRaw : [],             // OpenStreetMap 停車場原始清單
+  others : [],             // 去重後嘅「其他停車場」
   vacRaw : null,           // 最近一次取得的原始空位資料
   occ    : new Map(),      // spaceId -> {s:'V'|'O', t:epoch, meter:'N'|'NU'}
   pos    : null,
@@ -557,6 +569,34 @@ async function loadOccupancy(){
   S.ts.occ = Date.now();
 }
 
+/* 補充資料：人手查核嘅停車場 + OpenStreetMap 停車場（兩者都冇實時空位） */
+async function loadOthers(){
+  const got = await Promise.allSettled([getJSON(CFG.EXTRA), getJSON(CFG.OSM)]);
+  const ex = got[0].status === 'fulfilled' ? got[0].value : null;
+  const osm = got[1].status === 'fulfilled' ? got[1].value : null;
+
+  S.extra = (((ex && ex.rows) || [])).map(r => ({
+    kind:'other', src:'curated', id:r.id, name:r.name, lat:r.lat, lng:r.lng,
+    addr:r.addr || '', tel:r.tel || '', fee:r.fee || '', site:r.site || '',
+    ev:r.ev, hours:'', cap:null, source:r.source || ''
+  }));
+  S.osmRaw = (((osm && osm.rows) || [])).map(r => ({
+    kind:'other', src:'osm', id:r[0], name:r[1], lat:r[2], lng:r[3],
+    site:r[4] || '', hours:r[5] || '', feeTag:r[6] || '', cap:r[7],
+    addr:'', tel:'', ev:null, source:'OpenStreetMap'
+  }));
+  rebuildOthers();
+}
+
+/* OSM 好多點同政府場重複，45 米內當同一個場 */
+function rebuildOthers(){
+  const known = S.parks.concat(S.extra);
+  const osmOnly = S.osmRaw.filter(o =>
+    !known.some(p => distM([p.lat, p.lng], [o.lat, o.lng]) < 45));
+  S.others = S.extra.concat(osmOnly);
+  renderOthersOnMap();
+}
+
 /* ============================================================
    5. 整合：停車場空位
    ============================================================ */
@@ -591,6 +631,7 @@ function buildParks(vacList){
   });
   out.sort((a,b) => a.name.localeCompare(b.name, 'zh-Hant'));
   S.parks = out;
+  if(S.osmRaw.length || S.extra.length) rebuildOthers();
 }
 
 function parkStatus(p){
@@ -621,7 +662,8 @@ L.tileLayer(CFG.TILE, {
 }).addTo(map);
 L.control.zoom({position:'bottomright'}).addTo(map);
 
-/* 咪錶先加、停車場後加：停車場標記要疊喺咪錶上面 */
+/* 疊放次序：其他場（最底）→ 咪錶 → 政府停車場（最面） */
+const otherLayer = L.layerGroup().addTo(map);
 const meterLayer = L.layerGroup().addTo(map);
 const parkLayer  = L.layerGroup().addTo(map);
 const canvasRenderer = L.canvas({padding:.35});
@@ -693,6 +735,33 @@ function renderParksOnMap(){
   });
 }
 
+/* ---------- 其他停車場（冇實時空位） ---------- */
+function otherMatch(o){
+  if(!S.q) return false;
+  return norm(o.name + ' ' + (o.addr || '')).indexOf(norm(S.q)) >= 0;
+}
+function otherIcon(hit){
+  return L.divIcon({
+    className:'', iconSize:[18,18], iconAnchor:[9,9],
+    html:'<div class="po' + (hit ? ' hit' : '') + '"></div>'
+  });
+}
+function renderOthersOnMap(){
+  otherLayer.clearLayers();
+  if(!S.others.length) return;
+  const z = map.getZoom(), b = map.getBounds();
+  S.others.forEach(o => {
+    const hit = otherMatch(o);
+    if(!hit && z < 16) return;                 // 街景級先畫，免得滿地灰點
+    if(!b.contains([o.lat, o.lng])) return;
+    const mk = L.marker([o.lat, o.lng], {
+      icon: otherIcon(hit), title:o.name, keyboard:false, bubblingMouseEvents:false
+    });
+    mk.on('click', () => showOther(o));
+    otherLayer.addLayer(mk);
+  });
+}
+
 /* ---------- 咪錶標記 ---------- */
 function meterVisible(){
   const b = map.getBounds();
@@ -727,9 +796,11 @@ function renderMetersOnMap(){
 function syncLayers(){
   /* remove→add 令停車場層永遠喺咪錶層之上 */
   map.removeLayer(parkLayer);
+  map.removeLayer(otherLayer);
   S.show.meters ? map.addLayer(meterLayer) : map.removeLayer(meterLayer);
-  if(S.show.parks) map.addLayer(parkLayer);
+  if(S.show.parks){ map.addLayer(otherLayer); map.addLayer(parkLayer); }
   renderParksOnMap();
+  renderOthersOnMap();
   renderMetersOnMap();
 }
 
@@ -772,6 +843,7 @@ function render(){
     $('#hdr').textContent = num(S.parks.length) + ' 個停車場 · ' + num(S.meters.length) + ' 個咪錶位';
   }
   renderParksOnMap();
+  renderOthersOnMap();
   renderMetersOnMap();
   stamp();
   if(S.sel) return;
@@ -794,9 +866,34 @@ function sortedParks(){
     .map(p => ({p:p, d:null}));
 }
 
+function otherRowsList(){
+  if(S.q) return S.others.filter(otherMatch).slice(0, 15);
+  if(!S.pos) return [];
+  /* 有定位但冇搜尋：列出 600 米內、冇實時數據嘅場 */
+  const pos = [S.pos.lat, S.pos.lng];
+  return S.others
+    .map(o => ({o:o, d:distM(pos, [o.lat, o.lng])}))
+    .filter(x => x.d < 600)
+    .sort((a, b) => a.d - b.d)
+    .slice(0, 5)
+    .map(x => { x.o.dist = x.d; return x.o; });
+}
+
+function otherRowHtml(o, i){
+  const meta = [o.addr || '冇實時空位'];
+  if(o.dist != null) meta.push(distTxt(o.dist));
+  if(o.src === 'osm' && !o.addr) meta.push('OpenStreetMap');
+  return '<button class="row" data-kind="other" data-i="' + i + '">'
+    + '<span class="dot unknown"></span>'
+    + '<span class="main"><b>' + esc(o.name) + '</b><small>' + esc(meta.join(' · ')) + '</small></span>'
+    + '<span class="vac unknown"><b>無數據</b><small>其他場</small></span></button>';
+}
+
 function renderParkList(){
   const rows = sortedParks().slice(0, CFG.LIST_CAP);
-  if(!rows.length){
+  const others = otherRowsList();
+  S._otherRows = others;
+  if(!rows.length && !others.length){
     listSig = '';
     $('#list').innerHTML = '<div class="empty">冇符合嘅停車場<br><small>試下清除搜尋，或者關閉篩選</small>'
       + (S.q ? '<br><button class="linkbtn" data-goto="meters">睇下咪錶位有冇結果 →</button>' : '')
@@ -804,7 +901,8 @@ function renderParkList(){
     return;
   }
   const title = S.q ? '搜尋結果' : S.favOnly ? '★ 收藏' : S.pos ? '最近的停車場' : '空位最多的停車場';
-  const html = '<div class="secttl">' + title + '</div>' + rows.map((it, i) => {
+  let html = rows.length ? '<div class="secttl">' + title + '</div>' : '';
+  html += rows.map((it, i) => {
     const p = it.p, st = p.status;
     let right;
     if(p.vac != null){
@@ -823,8 +921,13 @@ function renderParkList(){
       + '<span class="main"><b>' + esc(p.name) + '</b><small>' + esc(meta.join(' · ')) + '</small></span>'
       + '<span class="vac ' + st + '">' + right + '</span></button>';
   }).join('');
+  if(others.length){
+    html += '<div class="secttl">' + (S.q ? '其他停車場' : '附近其他場') + ' · 冇實時空位（' + others.length + '）</div>'
+      + others.map(otherRowHtml).join('');
+  }
   S._parkRows = rows;
-  paintList('p|' + title + '|' + rows.map(it => it.p.id + ':' + it.p.vac + ':' + it.p.status).join(','), html);
+  paintList('p|' + title + '|' + rows.map(it => it.p.id + ':' + it.p.vac + ':' + it.p.status).join(',')
+            + '|o:' + others.map(o => o.id).join(','), html);
 }
 
 function meterGroups(){
@@ -1011,6 +1114,48 @@ function showMeter(m, opt){
   if(!opt.fly) map.flyTo([m.lat, m.lng], Math.max(map.getZoom(), 17), {duration:.5});
 }
 
+function showOther(o, opt){
+  opt = opt || {};
+  S.sel = {kind:'other', data:o};
+  listSig = '';
+  const d = S.pos ? distM([S.pos.lat, S.pos.lng], [o.lat, o.lng]) : null;
+  const nav = 'https://www.google.com/maps/dir/?api=1&destination=' + o.lat + ',' + o.lng;
+
+  const kv = [
+    o.addr ? ['地址', esc(o.addr)] : null,
+    o.fee ? ['時租', esc(o.fee)] : null,
+    o.hours ? ['開放時間', esc(o.hours)] : null,
+    o.cap ? ['車位', o.cap + ' 個'] : null,
+    o.ev ? ['設施', '電動車充電'] : null,
+    d != null ? ['距離', distTxt(d)] : null,
+    o.tel ? ['電話', '<a href="tel:' + esc(String(o.tel).replace(/\s/g, '')) + '">' + esc(o.tel) + '</a>'] : null
+  ].filter(Boolean);
+
+  const note = o.src === 'curated'
+    ? '呢個場冇加入政府開放數據，所以冇實時空位數字；上表資料來自' + esc(o.source || '營辦商網站') +
+      '（查核日期 2026-11-03），去之前最好打電話確認。'
+    : '位置資料來自 OpenStreetMap（© OpenStreetMap contributors，ODbL）。呢個場冇實時空位數字，收費同開放時間亦未必齊全。';
+
+  $('#list').innerHTML = '<div class="detail">'
+    + '<div class="dhead"><button class="back" id="back">‹ 返回</button>'
+      + '<span class="pill unknown">無實時空位</span></div>'
+    + '<h2 class="dtitle">' + esc(o.name) + '</h2>'
+    + '<div class="dsub">' + esc(o.addr || '位置由 OpenStreetMap 提供') + '</div>'
+    + '<div class="big"><span class="n unknown txt">冇實時數據</span>'
+      + '<span class="lbl">唔代表冇位<br>去之前最好打電話</span></div>'
+    + (kv.length ? '<dl class="kv">' + kv.map(kvRow).join('') + '</dl>' : '')
+    + '<div class="acts"><a href="' + nav + '" target="_blank" rel="noopener">導航前往</a>'
+      + (o.site ? '<a class="ghost" href="' + esc(o.site) + '" target="_blank" rel="noopener">停車場網站</a>'
+                : '<button class="ghost" id="centre">放大地圖</button>')
+    + '</div>'
+    + '<div class="note">' + note + '</div></div>';
+
+  $('#list').scrollTop = 0;
+  setCollapsed(false);
+  setTall(true);
+  if(!opt.fly) map.flyTo([o.lat, o.lng], Math.max(map.getZoom(), 17), {duration:.5});
+}
+
 function kvRow(pair){
   return '<dt>' + pair[0] + '</dt><dd>' + pair[1] + '</dd>';
 }
@@ -1121,6 +1266,9 @@ $('#list').addEventListener('click', e => {
   if(row.dataset.kind === 'park'){
     const it = (S._parkRows || [])[i];
     if(it) showPark(it.p, {fly:true});
+  }else if(row.dataset.kind === 'other'){
+    const o = (S._otherRows || [])[i];
+    if(o) showOther(o, {fly:true});
   }else{
     const x = (S._meterRows || [])[i];
     if(x){
@@ -1200,6 +1348,7 @@ function focusOnMatches(){
   const pts = [];
   if(S.tab === 'parks'){
     S.parks.filter(parkMatch).slice(0, 300).forEach(p => pts.push([p.lat, p.lng]));
+    S.others.filter(otherMatch).slice(0, 100).forEach(o => pts.push([o.lat, o.lng]));
   }else{
     S.meters.filter(meterMatch).slice(0, 800).forEach(m => pts.push([m.lat, m.lng]));
   }
@@ -1310,6 +1459,7 @@ map.on('click', e => {
 let moveTimer = null;
 map.on('moveend zoomend', () => {
   renderParksOnMap();
+  renderOthersOnMap();
   clearTimeout(moveTimer);
   moveTimer = setTimeout(renderMetersOnMap, 140);
 });
@@ -1355,6 +1505,7 @@ async function boot(){
   try{ await loadInfo(); }catch(e){ S.errors.info = true; }
   try{ await loadVacancy(); }catch(e){ S.errors.vac = true; }
   try{ await loadMeters(); }catch(e){ S.errors.meters = true; }
+  try{ await loadOthers(); }catch(e){ S.errors.others = true; }
   render();
 
   if(!S.parks.length && !S.meters.length){

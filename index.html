@@ -200,6 +200,7 @@ a{color:var(--accent)}
 .big .n.txt{font-size:26px;line-height:1.2;letter-spacing:-.2px;color:var(--muted);font-weight:750}
 .big .of{font-size:14px;color:var(--muted);padding-bottom:5px}
 .big .lbl{margin-left:auto;font-size:11.5px;color:var(--muted);padding-bottom:6px;text-align:right;line-height:1.4}
+.fresh{font-size:11px;color:var(--muted);margin:-3px 0 12px}
 .bar{height:8px;border-radius:var(--r-pill);background:#eef2f7;overflow:hidden;margin:0 0 14px}
 .bar i{display:block;height:100%;border-radius:var(--r-pill);background:var(--free)}
 .bar i.few{background:var(--few)}.bar i.full{background:var(--full)}
@@ -238,6 +239,9 @@ a{color:var(--accent)}
   border:3px solid #5b6b7c;box-shadow:0 0 0 2px rgba(255,255,255,.9), 0 1px 5px rgba(15,23,42,.35);
 }
 .po.hit{border-color:var(--accent);background:#e6f4f6}
+.po.free{border-color:var(--free)}
+.po.few{border-color:var(--few)}
+.po.full{border-color:var(--full)}
 .cl{
   position:absolute;left:0;top:0;transform:translate(-50%,-50%);
   white-space:nowrap;border-radius:13px;padding:5px 9px;
@@ -350,6 +354,7 @@ const CFG = {
   METERS  : 'data/meters.json',
   EXTRA   : 'data/parks_extra.json',      // 人手補充（官網查核）
   OSM     : 'data/parks_osm.json',        // OpenStreetMap 停車場
+  LIVE    : 'data/live_extra.json',       // 補充場嘅實時空位（InPark / 信和 S+）
   OCC     : 'https://resource.data.one.gov.hk/td/psiparkingspaces/occupancystatus/occupancystatus.csv',
   HK      : [22.34, 114.15],
   REFRESH_VAC  : 60e3,        // 停車場空位：每分鐘
@@ -444,6 +449,8 @@ const S = {
   extra  : [],             // 人手補充停車場（冇實時空位）
   osmRaw : [],             // OpenStreetMap 停車場原始清單
   others : [],             // 去重後嘅「其他停車場」
+  live   : {},             // 補充場實時空位（id -> {n,cap,mins,at}）
+  liveGen: '',             // 實時資料抓取時間
   vacRaw : null,           // 最近一次取得的原始空位資料
   occ    : new Map(),      // spaceId -> {s:'V'|'O', t:epoch, meter:'N'|'NU'}
   pos    : null,
@@ -578,7 +585,7 @@ async function loadOthers(){
   S.extra = (((ex && ex.rows) || [])).map(r => ({
     kind:'other', src:'curated', id:r.id, name:r.name, lat:r.lat, lng:r.lng,
     addr:r.addr || '', tel:r.tel || '', fee:r.fee || '', site:r.site || '',
-    ev:r.ev, hours:'', cap:null, source:r.source || ''
+    ev:r.ev, hours:'', cap:null, inpark:r.inpark || '', source:r.source || ''
   }));
   S.osmRaw = (((osm && osm.rows) || [])).map(r => ({
     kind:'other', src:'osm', id:r[0], name:r[1], lat:r[2], lng:r[3],
@@ -595,6 +602,35 @@ function rebuildOthers(){
     !known.some(p => distM([p.lat, p.lng], [o.lat, o.lng]) < 45));
   S.others = S.extra.concat(osmOnly);
   renderOthersOnMap();
+}
+
+/* 補充場實時空位：data/live_extra.json 由 tools/fetch_inpark.py 產生 */
+async function loadLive(){
+  try{
+    const d = await getJSON(CFG.LIVE);
+    S.live = (d && d.rows) || {};
+    S.liveGen = (d && d.generated) || '';
+  }catch(e){ S.live = {}; S.liveGen = ''; }
+  applyLive();
+}
+
+function applyLive(){
+  S.others.forEach(o => {
+    const l = S.live[o.id];
+    if(l && l.ok && l.n != null){
+      o.vac = l.n; o.cap = l.cap; o.mins = l.mins; o.fetched = S.liveGen;
+    }else{
+      o.vac = null;
+    }
+  });
+}
+
+/* 實時數字嘅顏色分級（同政府場一致） */
+function vacClass(n, cap){
+  if(n == null) return 'unknown';
+  if(n === 0) return 'full';
+  if((cap && n / cap >= 0.15) || n >= 15) return 'free';
+  return 'few';
 }
 
 /* ============================================================
@@ -740,10 +776,11 @@ function otherMatch(o){
   if(!S.q) return false;
   return norm(o.name + ' ' + (o.addr || '')).indexOf(norm(S.q)) >= 0;
 }
-function otherIcon(hit){
+function otherIcon(hit, o){
+  const cls = 'po' + (hit ? ' hit' : '') + (o && o.vac != null ? ' ' + vacClass(o.vac, o.cap) : '');
   return L.divIcon({
     className:'', iconSize:[18,18], iconAnchor:[9,9],
-    html:'<div class="po' + (hit ? ' hit' : '') + '"></div>'
+    html:'<div class="' + cls + '"></div>'
   });
 }
 function renderOthersOnMap(){
@@ -755,7 +792,7 @@ function renderOthersOnMap(){
     if(!hit && z < 16) return;                 // 街景級先畫，免得滿地灰點
     if(!b.contains([o.lat, o.lng])) return;
     const mk = L.marker([o.lat, o.lng], {
-      icon: otherIcon(hit), title:o.name, keyboard:false, bubblingMouseEvents:false
+      icon: otherIcon(hit, o), title:o.name, keyboard:false, bubblingMouseEvents:false
     });
     mk.on('click', () => showOther(o));
     otherLayer.addLayer(mk);
@@ -880,13 +917,18 @@ function otherRowsList(){
 }
 
 function otherRowHtml(o, i){
-  const meta = [o.addr || '冇實時空位'];
+  const live = o.vac != null;
+  const meta = [o.addr || (live ? '實時空位' : '冇實時空位')];
   if(o.dist != null) meta.push(distTxt(o.dist));
   if(o.src === 'osm' && !o.addr) meta.push('OpenStreetMap');
+  const cls = live ? vacClass(o.vac, o.cap) : 'unknown';
+  const right = live
+    ? '<span class="vac ' + cls + '"><b>' + o.vac + ' 位</b><small>' + (o.mins != null ? '實時 · ' + o.mins + ' 分鐘前' : '實時') + '</small></span>'
+    : '<span class="vac unknown"><b>無數據</b><small>其他場</small></span>';
   return '<button class="row" data-kind="other" data-i="' + i + '">'
-    + '<span class="dot unknown"></span>'
+    + '<span class="dot ' + cls + '"></span>'
     + '<span class="main"><b>' + esc(o.name) + '</b><small>' + esc(meta.join(' · ')) + '</small></span>'
-    + '<span class="vac unknown"><b>無數據</b><small>其他場</small></span></button>';
+    + right + '</button>';
 }
 
 function renderParkList(){
@@ -922,7 +964,9 @@ function renderParkList(){
       + '<span class="vac ' + st + '">' + right + '</span></button>';
   }).join('');
   if(others.length){
-    html += '<div class="secttl">' + (S.q ? '其他停車場' : '附近其他場') + ' · 冇實時空位（' + others.length + '）</div>'
+    const liveN = others.filter(o => o.vac != null).length;
+    const tag = liveN === others.length ? '實時空位' : liveN ? (liveN + '／' + others.length + ' 個有實時') : '冇實時空位';
+    html += '<div class="secttl">' + (S.q ? '其他停車場' : '附近其他場') + ' · ' + tag + '</div>'
       + others.map(otherRowHtml).join('');
   }
   S._parkRows = rows;
@@ -1131,18 +1175,27 @@ function showOther(o, opt){
     o.tel ? ['電話', '<a href="tel:' + esc(String(o.tel).replace(/\s/g, '')) + '">' + esc(o.tel) + '</a>'] : null
   ].filter(Boolean);
 
-  const note = o.src === 'curated'
-    ? '呢個場冇加入政府開放數據，所以冇實時空位數字；上表資料來自' + esc(o.source || '營辦商網站') +
+  const note = (o.src === 'curated' && o.vac != null)
+    ? '空位數字嚟自信和商場 S+ 停車場系統，經 InPark AI 頁面讀取，每 10 分鐘更新一次；'
+      + '呢個場冇加入政府開放數據。收費資料查核日期 2026-11-03。'
+    : o.src === 'curated'
+    ? '呢個場冇加入政府開放數據，亦搵唔到實時空位數字；上表資料來自' + esc(o.source || '營辦商網站') +
       '（查核日期 2026-11-03），去之前最好打電話確認。'
     : '位置資料來自 OpenStreetMap（© OpenStreetMap contributors，ODbL）。呢個場冇實時空位數字，收費同開放時間亦未必齊全。';
 
   $('#list').innerHTML = '<div class="detail">'
     + '<div class="dhead"><button class="back" id="back">‹ 返回</button>'
-      + '<span class="pill unknown">無實時空位</span></div>'
+      + '<span class="pill ' + (o.vac != null ? vacClass(o.vac, o.cap) : 'unknown') + '">'
+      + (o.vac != null ? '實時空位' : '無實時空位') + '</span></div>'
     + '<h2 class="dtitle">' + esc(o.name) + '</h2>'
     + '<div class="dsub">' + esc(o.addr || '位置由 OpenStreetMap 提供') + '</div>'
-    + '<div class="big"><span class="n unknown txt">冇實時數據</span>'
-      + '<span class="lbl">唔代表冇位<br>去之前最好打電話</span></div>'
+    + (o.vac != null
+        ? '<div class="big"><span class="n ' + vacClass(o.vac, o.cap) + '">' + o.vac + '</span>'
+          + '<span class="lbl">個空位 · 實時' + (o.cap ? '（共 ' + o.cap + ' 個）' : '') + '</span></div>'
+          + '<div class="fresh">' + (o.mins != null ? o.mins + ' 分鐘前更新' : '實時更新')
+          + ' · 信和商場 S+ 系統（經 InPark AI）</div>'
+        : '<div class="big"><span class="n unknown txt">冇實時數據</span>'
+          + '<span class="lbl">唔代表冇位<br>去之前最好打電話</span></div>')
     + (kv.length ? '<dl class="kv">' + kv.map(kvRow).join('') + '</dl>' : '')
     + '<div class="acts"><a href="' + nav + '" target="_blank" rel="noopener">導航前往</a>'
       + (o.site ? '<a class="ghost" href="' + esc(o.site) + '" target="_blank" rel="noopener">停車場網站</a>'
@@ -1506,6 +1559,7 @@ async function boot(){
   try{ await loadVacancy(); }catch(e){ S.errors.vac = true; }
   try{ await loadMeters(); }catch(e){ S.errors.meters = true; }
   try{ await loadOthers(); }catch(e){ S.errors.others = true; }
+  try{ await loadLive(); }catch(e){ S.errors.live = true; }
   render();
 
   if(!S.parks.length && !S.meters.length){

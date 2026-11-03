@@ -1,0 +1,37 @@
+name: live-extra
+
+# 補充停車場（信和 S+ 系統，經 InPark AI）嘅實時空位快照。
+# 每 10 分鐘抓一次，有變動才 commit，所以 Pages 會自動更新 data/live_extra.json。
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: live-extra
+  cancel-in-progress: false
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch live vacancy
+        run: python3 tools/fetch_inpark.py
+
+      - name: Commit if changed
+        run: |
+          git config user.name  "park-easy-bot"
+          git config user.email "park-easy-bot@users.noreply.github.com"
+          if git diff --quiet -- data/live_extra.json; then
+            echo "no change"
+            exit 0
+          fi
+          git add data/live_extra.json
+          git commit -m "chore(live): 更新補充場實時空位 $(TZ=Asia/Hong_Kong date +%H:%M)"
+          git push

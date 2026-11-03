@@ -27,10 +27,13 @@
 ```
 index.html             單檔應用（HTML + CSS + JS，無建置步驟，無第三方依賴除 Leaflet）
 data/meters.json       20,699 個咪錶位（id, 座標, 街道, 地區, 車種, 時限, 收費, 營運時段）
-data/parks_extra.json  政府數據冇收錄、人手查核嘅停車場（收費／電話／官網，附查核日期）
+data/parks_extra.json  政府數據冇收錄嘅停車場（`inpark` 欄指去 InPark AI 個場 id）
+data/live_extra.json   上述場嘅實時空位快照（由 GitHub Actions 每 10 分鐘更新）
 data/parks_osm.json    OpenStreetMap 有名字嘅停車場（608 個，冇實時空位）
 tools/build_meters.py  由運輸署 CSV 重建 data/meters.json
 tools/build_osm_parks.py 由 Overpass 重建 data/parks_osm.json
+tools/fetch_inpark.py  由 InPark AI 個場頁抽 liveVacancy，寫 data/live_extra.json
+.github/workflows/live.yml  每 10 分鐘跑 fetch_inpark.py 並 commit 有變動嘅快照
 tools/shot.py          headless Chrome 截圖＋煙霧測試（需要本機 http server）
 ```
 
@@ -40,6 +43,10 @@ tools/shot.py          headless Chrome 截圖＋煙霧測試（需要本機 http
 
 1. **有實時空位**：593 個場，綠色／黃色／紅色標記
 2. **冇實時空位**（空心圈）：`parks_extra.json` 人手查核嘅場 + OpenStreetMap 有名字嘅場，只提供位置、收費、電話、官網，唔會有空位數字
+
+### 實時空位（補充場）
+
+信和系商場（荃新天地、屯門市廣場、奧海城、中港城、黃金海岸、朗壹廣場）有實時車位數，但只經商場 S+ 系統／第三方聚合 app 發佈。`tools/fetch_inpark.py` 讀 InPark AI 個場頁內嵌嘅 `liveVacancy` 物件（`data_state: live`、`source_system: sino_splus`），寫成 `data/live_extra.json`；`.github/workflows/live.yml` 每 10 分鐘跑一次，有變動才 commit，Pages 自動更新。冇實時數字嘅場照樣顯示位置＋收費，UI 唔會扮有數。
 
 要加新場：喺 `data/parks_extra.json` 加一筆（`id, name, lat, lng, addr, tel, fee, site, ev, source`），座標可以用香港政府地址資料庫 <https://www.als.gov.hk/lookup?q=地址> 查，`source` 寫你查邊個官網，`checked` 更新日期。
 

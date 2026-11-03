@@ -255,6 +255,13 @@ a{color:var(--accent)}
 }
 .cl b{display:block;font-size:13px;font-weight:800;font-variant-numeric:tabular-nums}
 .cl span{display:block;font-size:9.5px;opacity:.75}
+/* 遠景：空位咪錶聚合成綠色小圓點（越大＝該區空位越多） */
+.gdot{
+  position:absolute;left:0;top:0;transform:translate(-50%,-50%);
+  border-radius:50%;background:#0e9f6e;border:1.5px solid #fff;
+  box-shadow:0 1px 4px rgba(15,23,42,.35);pointer-events:auto;cursor:pointer;
+}
+
 /* 已泊咪錶位：紅色小球顯示剩餘分鐘 */
 .mrem{
   position:absolute;left:0;top:0;transform:translate(-50%,-50%);
@@ -739,11 +746,16 @@ L.tileLayer(CFG.TILE, {
 }).addTo(map);
 L.control.zoom({position:'bottomright'}).addTo(map);
 
-/* 疊放次序：其他場（最底）→ 咪錶 → 政府停車場（最面） */
+/* 疊放次序：其他場（最底）→ 咪錶 → 政府停車場 → 空位咪錶（最面） */
+map.createPane('freePane');
+map.getPane('freePane').style.zIndex = 650;                  // 高於 markerPane(600)，空位一定見到
+map.getPane('freePane').style.pointerEvents = 'none';
 const otherLayer = L.layerGroup().addTo(map);
 const meterLayer = L.layerGroup().addTo(map);
 const parkLayer  = L.layerGroup().addTo(map);
+const freeLayer  = L.layerGroup().addTo(map);                // 綠色空位，最後加入＝最上層
 const canvasRenderer = L.canvas({padding:.35});
+const freeCanvas = L.canvas({pane:'freePane', padding:.35});
 let userLayer = null;
 
 /* ---------- 停車場標記 ---------- */
@@ -904,6 +916,7 @@ function renderMetersOnMap(){
   for(let i = 0; i < vis.length; i += step){
     const m = vis[Math.floor(i)];
     const o = S.occ.get(m.id);
+    if(o.s === 'V') continue;                     // 空位改由 freeLayer 畫（最上層）
     const rem = o.s === 'O' ? meterRemain(m) : null;
     if(ballIds && ballIds.has(m.id) && rem != null){
       const mk = L.marker([m.lat, m.lng], {icon: remIcon(rem, m.id, Math.floor(i) % 2 === 1), keyboard:false, bubblingMouseEvents:false});
@@ -918,15 +931,68 @@ function renderMetersOnMap(){
   }
 }
 
+/* ---------- 空位咪錶（綠色，最上層） ---------- */
+function freeIcon(n){
+  const d = Math.round(Math.min(18, 8 + Math.sqrt(n) * 1.1));
+  return L.divIcon({
+    className:'', iconSize:[0,0], iconAnchor:[0,0],
+    html:'<div class="gdot" style="width:' + d + 'px;height:' + d + 'px"></div>'
+  });
+}
+
+function renderFreeMeters(){
+  freeLayer.clearLayers();
+  if(!S.show.meters || !S.meters.length || !S.occ.size) return;
+  const z = map.getZoom(), b = map.getBounds();
+
+  if(z >= 16){                                  // 街景級：逐個空位畫綠點
+    for(const m of S.meters){
+      const o = S.occ.get(m.id);
+      if(!o || o.s !== 'V') continue;
+      if(S.q && !meterMatch(m)) continue;
+      if(!b.contains([m.lat, m.lng])) continue;
+      freeLayer.addLayer(L.circleMarker([m.lat, m.lng], {
+        renderer: freeCanvas, radius: z >= 19 ? 7 : 6, weight: 1.3, color:'#fff',
+        fillColor:'#0e9f6e', fillOpacity:.95, interactive:false
+      }));
+    }
+    return;
+  }
+
+  /* 遠景：按畫面方格聚合成綠色小球，數字＝該格空位數 */
+  const CELL = z <= 11 ? 130 : z <= 13 ? 96 : 64;   // 遠景用大格，避免綠球互相重疊
+  const cells = new Map();
+  for(const m of S.meters){
+    const o = S.occ.get(m.id);
+    if(!o || o.s !== 'V') continue;
+    if(S.q && !meterMatch(m)) continue;
+    if(!b.contains([m.lat, m.lng])) continue;
+    const pt = map.project([m.lat, m.lng], z);
+    const k = Math.floor(pt.x / CELL) + ':' + Math.floor(pt.y / CELL);
+    let c = cells.get(k);
+    if(!c){ c = {n:0, x:0, y:0}; cells.set(k, c); }
+    c.n++; c.x += pt.x; c.y += pt.y;
+  }
+  cells.forEach(c => {
+    const ll = map.unproject(L.point(c.x / c.n, c.y / c.n), z);
+    const mk = L.marker(ll, {icon: freeIcon(c.n), keyboard:false, bubblingMouseEvents:false, pane:'freePane'});
+    mk.on('click', () => map.setView(ll, Math.min(16, z + 2), {animate:true}));
+    freeLayer.addLayer(mk);
+  });
+}
+
 function syncLayers(){
   /* remove→add 使停車場圖層永遠位於咪錶圖層之上 */
   map.removeLayer(parkLayer);
   map.removeLayer(otherLayer);
+  map.removeLayer(freeLayer);
   S.show.meters ? map.addLayer(meterLayer) : map.removeLayer(meterLayer);
   if(S.show.parks){ map.addLayer(otherLayer); map.addLayer(parkLayer); }
+  if(S.show.meters) map.addLayer(freeLayer);      // 最後加入＝最上層
   renderParksOnMap();
   renderOthersOnMap();
   renderMetersOnMap();
+  renderFreeMeters();
 }
 
 /* ============================================================
@@ -986,6 +1052,7 @@ function render(){
   renderParksOnMap();
   renderOthersOnMap();
   renderMetersOnMap();
+  renderFreeMeters();
   stamp();
   if(S.sel) return;
   S.tab === 'parks' ? renderParkList() : renderMeterList();
@@ -1409,7 +1476,9 @@ function viewStats(){
 
 function metersOnScreen(){
   if(S.sel && S.sel.kind === 'meter') return true;
-  if(!S.show.meters || S.tab !== 'meters' || map.getZoom() < 16) return false;
+  if(!S.show.meters) return false;
+  if(S.tab === 'meters') return true;            // 看咪錶分頁：遠景都需要數據畫綠色空位
+  if(map.getZoom() < 16) return false;
   const b = map.getBounds();
   for(let i = 0; i < S.meters.length; i++){
     const m = S.meters[i];
@@ -1752,13 +1821,15 @@ map.on('moveend zoomend', () => {
   clearTimeout(moveTimer);
   moveTimer = setTimeout(() => {
     renderMetersOnMap();
+    renderFreeMeters();
     updateCounts();
     if(!S.sel) S.tab === 'parks' ? renderParkList() : renderMeterList();
   }, 140);
   /* 移到新區域：只有畫面上有場、而且資料過期，才補抓 */
   const v = viewStats();
   if((v.parks || v.others) && Date.now() - S.ts.vac > CFG.REFRESH_VAC && !S.busy.vac) refreshVacancy();
-  if(metersOnScreen() && Date.now() - S.ts.occ > 120e3 && !S.busy.occ) refreshOccupancy();
+  const occAge = map.getZoom() < 16 ? 300e3 : 120e3;
+  if(metersOnScreen() && Date.now() - S.ts.occ > occAge && !S.busy.occ) refreshOccupancy();
   if(v.live && Date.now() - S.ts.live > CFG.REFRESH_LIVE) refreshLive();
 });
 

@@ -169,6 +169,11 @@ a{color:var(--accent)}
 .row .main b{display:block;font-size:14px;font-weight:660;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .row .main small{display:block;font-size:11.5px;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .row .vac{flex:none;text-align:right;font-variant-numeric:tabular-nums}
+.row .main .tip{color:#0b6f7a;font-weight:650}
+.soonest{display:block;width:100%;text-align:left;font:inherit;font-size:12px;font-weight:650;
+  color:#0b6f7a;background:#eaf6f8;border:1px solid #cfe8ec;border-radius:10px;
+  padding:9px 11px;margin:2px 0 10px;cursor:pointer}
+.soonest.on{background:#0b6f7a;border-color:#0b6f7a;color:#fff}
 .row .vac b{font-size:18px;font-weight:760;line-height:1}
 .row .vac small{display:block;font-size:10.5px;color:var(--muted);margin-top:3px}
 .row .vac.free b{color:var(--free)}
@@ -995,13 +1000,48 @@ function meterGroups(){
       x.v++;
       const d = distM(ref, [m.lat, m.lng]);
       if(d < x.best){ x.best = d; x.lat = m.lat; x.lng = m.lng; }
+    }else if(o.s === 'O' && m.lpp && o.t){
+      /* 已泊：用「開始佔用時間 + 該錶上限」推算最快幾時有位 */
+      x.occ = (x.occ || 0) + 1;
+      const rem = m.lpp - (Date.now() - o.t) / 60000;
+      if(rem > 0) x.minRem = Math.min(x.minRem == null ? Infinity : x.minRem, rem);
+      else x.over = (x.over || 0) + 1;
     }
   });
   return [...g.values()]
     .map(x => ({x:x, d: x.v ? x.best : distM(ref, [x.lat, x.lng])}))
     .sort((a, b) => (b.x.v > 0) - (a.x.v > 0) || a.d - b.d)
     .map(o => ({street:o.x.street, section:o.x.section, district:o.x.district,
-                n:o.x.n, v:o.x.v, lat:o.x.lat, lng:o.x.lng, d:o.d}));
+                n:o.x.n, v:o.x.v, lat:o.x.lat, lng:o.x.lng, d:o.d,
+                occ:o.x.occ || 0, over:o.x.over || 0,
+                minRem:o.x.minRem == null ? null : o.x.minRem}));
+}
+
+/* 已泊嘅錶位：最快幾時有位（用佔用開始時間 + 上限推算） */
+function meterTip(x){
+  if(x.v > 0) return '';
+  if(x.minRem != null) return '最快 ' + Math.max(1, Math.ceil(x.minRem)) + ' 分鐘後有位';
+  if(x.over) return '有咪錶已泊超時';
+  return '';
+}
+
+function meterBodyOccupied(m, o, elapsedMin){
+  if(!o.t || !m.lpp){
+    return '<div class="big"><span class="n full">已泊</span>'
+      + (elapsedMin != null ? '<span class="of">' + (elapsedMin < 60 ? elapsedMin + ' 分鐘' : (elapsedMin/60).toFixed(1) + ' 小時') + '</span>' : '')
+      + '<span class="lbl">' + (m.lpp ? '上限 ' + m.lpp + ' 分鐘' : '未提供泊車上限') + '</span></div>';
+  }
+  const rem = m.lpp - elapsedMin;
+  const over = rem <= 0;
+  const pct = clamp(elapsedMin / m.lpp * 100, 0, 100);
+  return '<div class="big"><span class="n ' + (over ? 'few' : 'full') + '" id="mtRem">'
+    + (over ? '超時' : Math.ceil(rem)) + '</span>'
+    + (over ? '' : '<span class="of" id="mtSuf">分鐘</span>')
+    + '<span class="lbl">' + (over ? '已泊 ' + Math.round(elapsedMin) + ' 分鐘<br>（上限 ' + m.lpp + '）'
+                              : '最快仲有咁耐有位<br>（上限 ' + m.lpp + ' 分鐘）') + '</span></div>'
+    + '<div class="fresh" id="mtSub">已泊 ' + Math.round(elapsedMin) + ' 分鐘 · 由 ' + hhmm(o.t) + ' 起'
+    + (over ? ' · 可能已續泊' : '') + '</div>'
+    + '<div class="bar"><i class="' + (over ? 'full' : 'few') + '" style="width:' + pct + '%"></i></div>';
 }
 
 function renderMeterList(){
@@ -1010,25 +1050,44 @@ function renderMeterList(){
     refreshOccupancy();
     return;
   }
-  const arr = meterGroups().slice(0, CFG.LIST_CAP);
+  const groups = meterGroups();
+  const fullG = groups.filter(x => x.v === 0 && x.minRem != null);
+  const soonest = fullG.length ? Math.min.apply(null, fullG.map(x => x.minRem)) : null;
+  const all = S.soonestOnly
+    ? fullG.slice().sort((a, b) => a.minRem - b.minRem)
+    : groups;
+  const arr = all.slice(0, CFG.LIST_CAP);
+  const summary = fullG.length
+    ? '<button class="soonest' + (S.soonestOnly ? ' on' : '') + '" id="soonest">'
+      + (S.soonestOnly
+          ? '✓ 只顯示已泊滿 · 最快有位排先'
+          : fullG.length + ' 條街道／場已泊滿 · 最快 ' + Math.max(1, Math.ceil(soonest)) + ' 分鐘後有位 ›')
+      + '</button>'
+    : '';
   if(!arr.length){
     listSig = '';
-    $('#list').innerHTML = '<div class="empty">冇符合嘅咪錶位<br><small>試下清除搜尋，或者關閉篩選</small>'
+    $('#list').innerHTML = '<div class="empty">' + (S.soonestOnly ? '而家冇已泊滿嘅街道' : '冇符合嘅咪錶位')
+      + '<br><small>試下清除搜尋，或者關閉篩選</small>'
       + (S.q ? '<br><button class="linkbtn" data-goto="parks">睇下停車場有冇結果 →</button>' : '')
       + '</div>';
     return;
   }
-  const html = '<div class="secttl">按街道分組 · 空置 / 總數</div>' + arr.map((x, i) => {
+  const html = summary + '<div class="secttl">'
+    + (S.soonestOnly ? '已泊滿街道 · 最快有位排先' : '按街道分組 · 空置 / 總數') + '</div>'
+    + arr.map((x, i) => {
     const st = x.v === 0 ? 'full' : (x.v / x.n >= 0.3 ? 'free' : 'few');
+    const tip = meterTip(x);
     return '<button class="row" data-i="' + i + '" data-kind="meter">'
       + '<span class="dot ' + st + '"></span>'
       + '<span class="main"><b>' + esc(x.street) + (x.section ? '（' + esc(x.section) + '）' : '') + '</b>'
       + '<small>' + esc(x.district) + ' · ' + x.n + ' 個咪錶位'
-      + (x.d != null ? ' · ' + distTxt(x.d) : '') + '</small></span>'
+      + (x.d != null ? ' · ' + distTxt(x.d) : '') + '</small>'
+      + (tip ? '<small class="tip">' + tip + '</small>' : '') + '</span>'
       + '<span class="vac ' + st + '"><b>' + x.v + '</b><small>/ ' + x.n + '</small></span></button>';
   }).join('');
   S._meterRows = arr;
-  paintList('m|' + arr.map(x => x.district + x.street + x.section + ':' + x.v + '/' + x.n + ':' + Math.round(x.d || 0)).join(','), html);
+  paintList('m|' + (summary ? 'S' + Math.ceil(soonest) + '|' : '') + arr.map(x => x.district + x.street + x.section + ':' + x.v + '/' + x.n + ':' + Math.round(x.d || 0)
+              + ':' + (x.minRem == null ? '' : Math.ceil(x.minRem))).join(','), html);
 }
 
 /* ============================================================
@@ -1119,13 +1178,7 @@ function showMeter(m, opt){
     ? '<div class="big"><span class="n free">有位</span>'
       + '<span class="lbl">' + (elapsedMin == null ? '' :
           elapsedMin < 2 ? '剛剛空出' : '約 ' + elapsedMin + ' 分鐘前空出') + '</span></div>'
-    : '<div class="big"><span class="n full">已泊</span>'
-      + (elapsedMin != null ? '<span class="of">' + (elapsedMin < 60 ? elapsedMin + ' 分鐘' : (elapsedMin/60).toFixed(1) + ' 小時') + '</span>' : '')
-      + '<span class="lbl">' + (m.lpp ? '上限 ' + m.lpp + ' 分鐘' : '') + '</span></div>'
-      + (m.lpp && elapsedMin != null
-          ? '<div class="bar"><i class="' + (elapsedMin >= m.lpp ? 'full' : 'few') + '" style="width:'
-            + clamp(elapsedMin / m.lpp * 100, 0, 100) + '%"></i></div>'
-          : '');
+    : meterBodyOccupied(m, o, elapsedMin);
 
   const kv = [
     ['位置', esc(m.street) + (m.section ? '<br><span style="color:#64748b">近 ' + esc(m.section) + '</span>' : '')],
@@ -1149,7 +1202,9 @@ function showMeter(m, opt){
       + '<button class="ghost" id="centre">放大地圖</button></div>'
     + '<div class="note">' + (free
         ? '「有位」由咪錶感測器偵測，最後狀態：' + (o.t ? ago(o.t) + '前' : '—') + '。'
-        : '開放數據只提供「佔用/空置」，唔會顯示實際剩餘泊車時間（要睇「入錶易」）。上面「已泊」時間＝感測器偵測到佔用至今，只作估算。')
+        : '剩餘時間係推算：開放數據只講「已佔用」同幾時開始佔用，冇顯示實際入錶時數。'
+          + '上面用「開始佔用時間 ＋ 呢個錶嘅最長泊車時間」計，所以係<b>最快</b>幾時有位——'
+          + '車主可能只入咗半個鐘就續／走，實際未必等到咁耐。')
       + '</div></div>';
 
   $('#list').scrollTop = 0;
@@ -1304,6 +1359,9 @@ $('#list').addEventListener('click', e => {
     setTall(false);
     return;
   }
+
+  const soon = e.target.closest('#soonest');
+  if(soon){ S.soonestOnly = !S.soonestOnly; listSig = ''; renderMeterList(); return; }
 
   const goto = e.target.closest('[data-goto]');
   if(goto){
@@ -1533,7 +1591,7 @@ window.addEventListener('offline', () => setLive('err', '離線'));
 /* ============================================================
    12. 起動
    ============================================================ */
-window.__pe = {S:S, map:map, showPark:showPark, showMeter:showMeter, render:render};
+window.__pe = {S:S, map:map, showPark:showPark, showMeter:showMeter, render:render, meterGroups:meterGroups, meterMatch:meterMatch};
 
 async function boot(){
   setFavChip();
@@ -1578,6 +1636,26 @@ async function boot(){
   setInterval(() => {
     if(S.show.meters && document.visibilityState === 'visible') refreshOccupancy();
   }, CFG.REFRESH_OCC);
+  /* 倒數每 30 秒更新一次，唔需要再抓資料 */
+  setInterval(() => {
+    if(document.visibilityState !== 'visible') return;
+    if(S.sel && S.sel.kind === 'meter'){
+      const el = document.getElementById('mtRem');
+      const o = S.occ.get(S.sel.data.id);
+      if(el && o && o.t && S.sel.data.lpp){
+        const min = S.sel.data.lpp - (Date.now() - o.t) / 60000;
+        el.textContent = min > 0 ? Math.ceil(min) : '超時';
+        el.className = 'n ' + (min > 0 ? 'full' : 'few');
+        const suf = document.getElementById('mtSuf');
+        if(suf) suf.style.display = min > 0 ? '' : 'none';
+        const sub = document.getElementById('mtSub');
+        if(sub) sub.textContent = '已泊 ' + Math.floor((Date.now() - o.t) / 60000) + ' 分鐘 · 由 '
+          + hhmm(o.t) + ' 起' + (min <= 0 ? ' · 可能已續泊' : '');
+      }
+    }else if(!S.sel && S.tab === 'meters'){
+      renderMeterList();
+    }
+  }, 30000);
 }
 
 boot();

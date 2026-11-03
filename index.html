@@ -1384,6 +1384,7 @@ function showMeter(m, opt){
 
 function showOther(o, opt){
   opt = opt || {};
+  const keepScroll = opt.keep ? $('#list').scrollTop : 0;
   S.sel = {kind:'other', data:o};
   listSig = '';
   const d = S.pos ? distM([S.pos.lat, S.pos.lng], [o.lat, o.lng]) : null;
@@ -1427,6 +1428,11 @@ function showOther(o, opt){
     + '</div>'
     + '<div class="note">' + note + '</div></div>';
 
+  if(opt.keep){                        /* 只更新內容：實時數字刷新時不可彈出面板或移動地圖 */
+    S.sel = {kind:'other', data:o};
+    $('#list').scrollTop = keepScroll;
+    return;
+  }
   $('#list').scrollTop = 0;
   setCollapsed(false);
   setTall(true);
@@ -1502,7 +1508,7 @@ async function refreshLive(force){
   try{
     await loadLive();
     renderOthersOnMap();
-    if(S.sel && S.sel.kind === 'other') showOther(S.sel.data, {fly:true});
+    if(S.sel && S.sel.kind === 'other') showOther(S.sel.data, {keep:true});
     else if(!S.sel) render();
   }catch(e){
     S.errors.live = true;

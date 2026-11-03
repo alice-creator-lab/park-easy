@@ -255,6 +255,17 @@ a{color:var(--accent)}
 }
 .cl b{display:block;font-size:13px;font-weight:800;font-variant-numeric:tabular-nums}
 .cl span{display:block;font-size:9.5px;opacity:.75}
+/* 已泊咪錶位：紅色小球顯示剩餘分鐘 */
+.mrem{
+  position:absolute;left:0;top:0;transform:translate(-50%,-50%);
+  min-width:17px;height:17px;padding:0 2px;border-radius:9px;
+  display:flex;align-items:center;justify-content:center;text-align:center;
+  background:#e02424;color:#fff;font-size:9px;font-weight:800;line-height:1;
+  border:1.5px solid #fff;box-shadow:0 1px 4px rgba(15,23,42,.38);
+  font-variant-numeric:tabular-nums;cursor:pointer;
+}
+.mrem.over{background:#7f1d1d}
+
 /* 有實時數字的補充停車場：小型數字標記，以便與政府停車場區分 */
 .pk2{
   position:absolute;left:0;top:0;transform:translate(-50%,-50%);
@@ -345,6 +356,7 @@ a{color:var(--accent)}
   <span><i style="background:#e02424"></i>已滿</span>
   <span><i style="background:#94a3b8"></i>無資料</span>
   <span><i style="background:#fff;border:2px solid #5b6b7c;box-sizing:border-box"></i>其他停車場</span>
+  <span><i style="width:9px;height:9px;border-radius:50%;background:#e02424"></i>數字＝剩餘分鐘</span>
 </div>
 
 <section id="sheet" aria-label="泊車列表">
@@ -467,6 +479,7 @@ const S = {
   info   : new Map(),      // park_Id -> 靜態資料
   parks  : [],             // 已整合空位的停車場
   meters : [],             // 咪錶（由 meters.json）
+  byId   : new Map(),      // 咪錶 id -> 物件
   extra  : [],             // 人手補充停車場（無實時空位）
   osmRaw : [],             // OpenStreetMap 停車場原始清單
   others : [],             // 去重後的「其他停車場」
@@ -583,6 +596,7 @@ async function loadMeters(){
     return o;
   });
   S.ts.meters = Date.now();
+  S.byId = new Map(S.meters.map(m => [m.id, m]));
   $('#nMeters').textContent = num(S.meters.length);
 }
 async function loadOccupancy(){
@@ -844,6 +858,22 @@ function meterVisible(){
   });
 }
 
+/* 已泊咪錶位嘅剩餘分鐘（以佔用開始時間 + 上限推算） */
+function meterRemain(m){
+  const o = S.occ.get(m.id);
+  if(!o || o.s !== 'O' || !m.lpp || !o.t) return null;
+  return m.lpp - (Date.now() - o.t) / 60000;
+}
+
+function remIcon(rem, id){
+  const over = rem <= 0;
+  return L.divIcon({
+    className:'', iconSize:[0,0], iconAnchor:[0,0],
+    html:'<div class="mrem' + (over ? ' over' : '') + '" data-mid="' + id + '">'
+      + Math.max(0, Math.ceil(rem)) + '</div>'
+  });
+}
+
 function renderMetersOnMap(){
   meterLayer.clearLayers();
   if(!S.show.meters || !S.meters.length) return;
@@ -851,13 +881,36 @@ function renderMetersOnMap(){
   if(z < 16) return;                           // 街景級先顯示咪錶點，遠景會太密
   const vis = meterVisible();
 
+  /* 街道級（z ≥ 17）時，已泊嘅位改用紅色小球顯示剩餘分鐘 */
+  /* 紅色小球最多顯示 N 個，優先顯示最快到期嘅車位，其餘保留圓點 */
+  const MAXBALL = z >= 18 ? 150 : 45;
+  let ballIds = null;
+  if(z >= 17){
+    const cand = [];
+    for(const m of vis){
+      const r = meterRemain(m);
+      if(r == null || r <= 0) continue;
+      if(z < 18 && r > 10) continue;              // 17 級只標最快 10 分鐘內到期嘅位
+      cand.push([r, m.id]);
+    }
+    cand.sort((a, b) => a[0] - b[0]);
+    ballIds = new Set(cand.slice(0, MAXBALL).map(x => x[1]));
+  }
+
   const CAP = 5000, step = vis.length > CAP ? vis.length/CAP : 1;
   for(let i = 0; i < vis.length; i += step){
     const m = vis[Math.floor(i)];
-    const free = S.occ.get(m.id).s === 'V';
+    const o = S.occ.get(m.id);
+    const rem = o.s === 'O' ? meterRemain(m) : null;
+    if(ballIds && ballIds.has(m.id) && rem != null && rem > 0){
+      const mk = L.marker([m.lat, m.lng], {icon: remIcon(rem, m.id), keyboard:false, bubblingMouseEvents:false});
+      mk.on('click', () => showMeter(m));
+      meterLayer.addLayer(mk);
+      continue;
+    }
     meterLayer.addLayer(L.circleMarker([m.lat, m.lng], {
       renderer: canvasRenderer, radius: 6, weight: 1.3, color:'#fff',
-      fillColor: free ? '#0e9f6e' : '#e02424', fillOpacity:.95, interactive:false
+      fillColor: o.s === 'V' ? '#0e9f6e' : '#e02424', fillOpacity:.95, interactive:false
     }));
   }
 }
@@ -1757,6 +1810,14 @@ async function boot(){
     }else if(!S.sel && S.tab === 'meters'){
       renderMeterList();
     }
+    /* 街景級嘅紅色小球：每 30 秒更新剩餘分鐘 */
+    document.querySelectorAll('.mrem[data-mid]').forEach(el => {
+      const m = S.byId.get(el.dataset.mid);
+      const rem = m ? meterRemain(m) : null;
+      if(rem == null) return;
+      el.textContent = Math.max(0, Math.ceil(rem));
+      el.classList.toggle('over', rem <= 0);
+    });
   }, 30000);
 }
 

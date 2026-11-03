@@ -255,6 +255,20 @@ a{color:var(--accent)}
 }
 .cl b{display:block;font-size:13px;font-weight:800;font-variant-numeric:tabular-nums}
 .cl span{display:block;font-size:9.5px;opacity:.75}
+/* 有實時數字嘅補充場：細小數字牌，方便同政府場分開 */
+.pk2{
+  position:absolute;left:0;top:0;transform:translate(-50%,-50%);
+  display:flex;align-items:baseline;gap:2px;white-space:nowrap;
+  border-radius:11px;padding:3px 7px;background:#fff;
+  border:2px solid var(--free);box-shadow:0 0 0 2px rgba(255,255,255,.92), 0 2px 8px rgba(15,23,42,.3);
+  font-variant-numeric:tabular-nums;
+}
+.pk2 b{font-size:13.5px;font-weight:800;line-height:1}
+.pk2 small{font-size:9px;font-weight:700;opacity:.6}
+.pk2.free{border-color:var(--free);color:#0b7a52}
+.pk2.few{border-color:var(--few);color:#96650a}
+.pk2.full{border-color:var(--full);color:#b91c1c}
+.pk2.unknown{border-color:#94a3b8;color:#475569}
 .cl.good{background:rgba(14,159,110,.95)}
 .cl.mid{background:rgba(232,164,0,.95)}
 .cl.bad{background:rgba(224,36,36,.95)}
@@ -330,6 +344,7 @@ a{color:var(--accent)}
   <span><i style="background:#e8a400"></i>車位緊張</span>
   <span><i style="background:#e02424"></i>已滿</span>
   <span><i style="background:#94a3b8"></i>無資料</span>
+  <span><i style="background:#fff;border:2px solid #5b6b7c;box-sizing:border-box"></i>其他場</span>
 </div>
 
 <section id="sheet" aria-label="泊車列表">
@@ -782,7 +797,13 @@ function otherMatch(o){
   return norm(o.name + ' ' + (o.addr || '')).indexOf(norm(S.q)) >= 0;
 }
 function otherIcon(hit, o){
-  const cls = 'po' + (hit ? ' hit' : '') + (o && o.vac != null ? ' ' + vacClass(o.vac, o.cap) : '');
+  if(o && o.vac != null){                       // 有實時數字 → 數字牌
+    return L.divIcon({
+      className:'', iconSize:[0,0], iconAnchor:[0,0],
+      html:'<div class="pk2 ' + vacClass(o.vac, o.cap) + '"><b>' + o.vac + '</b><small>位</small></div>'
+    });
+  }
+  const cls = 'po' + (hit ? ' hit' : '');
   return L.divIcon({
     className:'', iconSize:[18,18], iconAnchor:[9,9],
     html:'<div class="' + cls + '"></div>'
@@ -794,7 +815,8 @@ function renderOthersOnMap(){
   const z = map.getZoom(), b = map.getBounds();
   S.others.forEach(o => {
     const hit = otherMatch(o);
-    if(!hit && z < 16) return;                 // 街景級先畫，免得滿地灰點
+    /* 有實時數字嘅場（信和系）任何 zoom 都畫；其餘灰圈要街景級，免得滿地雜點 */
+    if(!hit && o.vac == null && z < 16) return;
     if(!b.contains([o.lat, o.lng])) return;
     const mk = L.marker([o.lat, o.lng], {
       icon: otherIcon(hit, o), title:o.name, keyboard:false, bubblingMouseEvents:false
@@ -1455,6 +1477,13 @@ $('#q').addEventListener('keydown', e => {
   if(e.key === 'Enter'){ e.preventDefault(); e.target.blur(); focusOnMatches(); }
 });
 
+/* 底部面板而家佔幾高（px），用嚟避開地圖可視範圍 */
+function sheetPad(){
+  const sh = document.getElementById('sheet');
+  if(!sh) return 0;
+  return Math.round(sh.getBoundingClientRect().height) + 8;
+}
+
 function focusOnMatches(){
   const pts = [];
   if(S.tab === 'parks'){
@@ -1464,8 +1493,10 @@ function focusOnMatches(){
     S.meters.filter(meterMatch).slice(0, 800).forEach(m => pts.push([m.lat, m.lng]));
   }
   if(!pts.length) return;
-  if(pts.length === 1){ map.flyTo(pts[0], 17, {duration:.5}); return; }
-  map.fitBounds(L.latLngBounds(pts).pad(.18), {maxZoom: 16, animate:true});
+  /* 下面 sheet 佔住畫面，fitBounds 要避開，唔係結果會藏喺面板後面 */
+  const pad = sheetPad();
+  map.fitBounds(L.latLngBounds(pts).pad(pts.length === 1 ? 0 : .18),
+    {maxZoom: pts.length === 1 ? 17 : 16, animate:true, paddingBottomRight:[0, pad]});
 }
 
 /* 定位 */
@@ -1484,7 +1515,7 @@ function locate(){
       L.circle([p.lat, p.lng], {radius: Math.max(60, pos.coords.accuracy || 0),
         color:'#2563eb', weight:1, opacity:.3, fillOpacity:.06})
     ]).addTo(map);
-    map.flyTo([p.lat, p.lng], 16, {duration:.8});
+    map.fitBounds(L.latLngBounds([p, p]), {maxZoom:16, animate:true, paddingBottomRight:[0, sheetPad()]});
     stamp();
     if(!S.sel) render();
   }, err => {

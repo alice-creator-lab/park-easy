@@ -272,6 +272,16 @@ a{color:var(--accent)}
   font-variant-numeric:tabular-nums;cursor:pointer;
 }
 .mrem.over{background:#7f1d1d}
+
+/* 空位咪錶：與紅色小球同尺寸、同格式（白邊、陰影、圓形） */
+.fmk{
+  position:absolute;left:0;top:0;transform:translate(-50%,-50%);
+  min-width:17px;height:17px;padding:0 2px;border-radius:9px;
+  display:flex;align-items:center;justify-content:center;text-align:center;
+  background:#0e9f6e;color:#fff;font-size:9px;font-weight:800;line-height:1;
+  border:1.5px solid #fff;box-shadow:0 1px 4px rgba(15,23,42,.38);cursor:pointer;
+}
+.fmk::before{content:'';position:absolute;inset:-8px;border-radius:50%}
 .mrem.up{transform:translate(-50%,-190%)}
 .mrem::before{content:'';position:absolute;inset:-8px;border-radius:50%}
 
@@ -946,16 +956,23 @@ function renderFreeMeters(){
   if(!S.show.meters || !S.meters.length || !S.occ.size) return;
   const z = map.getZoom(), b = map.getBounds();
 
-  if(z >= 16){                                  // 街景級：逐個空位畫綠點
+  if(z >= 16){                                  // 街景級：逐個空位畫綠球
     for(const m of S.meters){
       const o = S.occ.get(m.id);
       if(!o || o.s !== 'V') continue;
       if(S.q && !meterMatch(m)) continue;
       if(!b.contains([m.lat, m.lng])) continue;
-      freeLayer.addLayer(L.circleMarker([m.lat, m.lng], {
-        renderer: freeCanvas, radius: z >= 19 ? 7 : 6, weight: 1.3, color:'#fff',
-        fillColor:'#0e9f6e', fillOpacity:.95, interactive:false
-      }));
+      if(z >= 17){                              // 與紅色小球同尺寸、同格式
+        const mk = L.marker([m.lat, m.lng], {icon: L.divIcon({className:'', iconSize:[0,0], iconAnchor:[0,0],
+          html:'<div class="fmk" data-mid="' + m.id + '">空</div>'}), keyboard:false, bubblingMouseEvents:false, pane:'freePane'});
+        mk.on('click', () => { if(tapOk()) showMeter(m); });
+        freeLayer.addLayer(mk);
+      }else{
+        freeLayer.addLayer(L.circleMarker([m.lat, m.lng], {
+          renderer: freeCanvas, radius: 6, weight: 1.3, color:'#fff',
+          fillColor:'#0e9f6e', fillOpacity:.95, interactive:false
+        }));
+      }
     }
     return;
   }

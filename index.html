@@ -265,6 +265,7 @@ a{color:var(--accent)}
   font-variant-numeric:tabular-nums;cursor:pointer;
 }
 .mrem.over{background:#7f1d1d}
+.mrem.up{transform:translate(-50%,-190%)}
 
 /* 有實時數字的補充停車場：小型數字標記，以便與政府停車場區分 */
 .pk2{
@@ -356,7 +357,6 @@ a{color:var(--accent)}
   <span><i style="background:#e02424"></i>已滿</span>
   <span><i style="background:#94a3b8"></i>無資料</span>
   <span><i style="background:#fff;border:2px solid #5b6b7c;box-sizing:border-box"></i>其他停車場</span>
-  <span><i style="width:9px;height:9px;border-radius:50%;background:#e02424"></i>數字＝剩餘分鐘</span>
 </div>
 
 <section id="sheet" aria-label="泊車列表">
@@ -597,7 +597,7 @@ async function loadMeters(){
   });
   S.ts.meters = Date.now();
   S.byId = new Map(S.meters.map(m => [m.id, m]));
-  $('#nMeters').textContent = num(S.meters.length);
+  if($('#nMeters')) updateCounts();
 }
 async function loadOccupancy(){
   const text = await getText(CFG.OCC);
@@ -865,11 +865,11 @@ function meterRemain(m){
   return m.lpp - (Date.now() - o.t) / 60000;
 }
 
-function remIcon(rem, id){
+function remIcon(rem, id, up){
   const over = rem <= 0;
   return L.divIcon({
     className:'', iconSize:[0,0], iconAnchor:[0,0],
-    html:'<div class="mrem' + (over ? ' over' : '') + '" data-mid="' + id + '">'
+    html:'<div class="mrem' + (over ? ' over' : '') + (up ? ' up' : '') + '" data-mid="' + id + '">'
       + Math.max(0, Math.ceil(rem)) + '</div>'
   });
 }
@@ -889,9 +889,10 @@ function renderMetersOnMap(){
     const cand = [];
     for(const m of vis){
       const r = meterRemain(m);
-      if(r == null || r <= 0) continue;
-      if(z < 18 && r > 10) continue;              // 17 級只標最快 10 分鐘內到期嘅位
-      cand.push([r, m.id]);
+      if(r == null) continue;
+      const rr = Math.max(0, r);                  // 超時顯示 0
+      if(z < 18 && rr > 10) continue;             // 17 級只標最快 10 分鐘內到期或已超時
+      cand.push([rr, m.id]);
     }
     cand.sort((a, b) => a[0] - b[0]);
     ballIds = new Set(cand.slice(0, MAXBALL).map(x => x[1]));
@@ -902,8 +903,8 @@ function renderMetersOnMap(){
     const m = vis[Math.floor(i)];
     const o = S.occ.get(m.id);
     const rem = o.s === 'O' ? meterRemain(m) : null;
-    if(ballIds && ballIds.has(m.id) && rem != null && rem > 0){
-      const mk = L.marker([m.lat, m.lng], {icon: remIcon(rem, m.id), keyboard:false, bubblingMouseEvents:false});
+    if(ballIds && ballIds.has(m.id) && rem != null){
+      const mk = L.marker([m.lat, m.lng], {icon: remIcon(rem, m.id, Math.floor(i) % 2 === 1), keyboard:false, bubblingMouseEvents:false});
       mk.on('click', () => showMeter(m));
       meterLayer.addLayer(mk);
       continue;
@@ -930,6 +931,26 @@ function syncLayers(){
    7. 篩選
    ============================================================ */
 function norm(s){ return String(s || '').toLowerCase(); }
+
+/* 只計／只列畫面範圍內的資料；縮小至全港時自然包含全部 */
+function inView(o){
+  if(!o || o.lat == null) return true;
+  return map.getBounds().contains([o.lat, o.lng]);
+}
+function viewCounts(){
+  let parks = 0, meters = 0;
+  for(const p of S.parks) if(inView(p)) parks++;
+  for(const m of S.meters) if(inView(m)) meters++;
+  return {parks:parks, meters:meters};
+}
+function updateCounts(){
+  const c = viewCounts();
+  $('#nParks').textContent  = S.parks.length  ? num(c.parks)  : '–';
+  $('#nMeters').textContent = S.meters.length ? num(c.meters) : '–';
+  if(S.parks.length || S.meters.length){
+    $('#hdr').textContent = num(c.parks) + ' 個停車場 · ' + num(c.meters) + ' 個咪錶位（畫面範圍）';
+  }
+}
 function parkMatch(p){
   if(!S.q) return true;
   return norm(p.name + ' ' + p.addr + ' ' + p.district).indexOf(norm(S.q)) >= 0;
@@ -959,11 +980,7 @@ function paintList(sig, html){
   el.scrollTop = st;
 }
 function render(){
-  $('#nParks').textContent  = S.parks.length ? num(S.parks.length) : '–';
-  $('#nMeters').textContent = S.meters.length ? num(S.meters.length) : '–';
-  if(S.parks.length || S.meters.length){
-    $('#hdr').textContent = num(S.parks.length) + ' 個停車場 · ' + num(S.meters.length) + ' 個咪錶位';
-  }
+  updateCounts();
   renderParksOnMap();
   renderOthersOnMap();
   renderMetersOnMap();
@@ -973,7 +990,7 @@ function render(){
 }
 
 function sortedParks(){
-  let list = S.parks.filter(parkMatch);
+  let list = S.parks.filter(p => parkMatch(p) && inView(p));
   if(S.onlyFree) list = list.filter(p => p.vac > 0 || (p.vac == null && p.avail === 'yes'));
   if(S.favOnly)  list = list.filter(p => S.fav.has(p.id));
   if(S.pos){
@@ -989,11 +1006,12 @@ function sortedParks(){
 }
 
 function otherRowsList(){
-  if(S.q) return S.others.filter(otherMatch).slice(0, 15);
+  if(S.q) return S.others.filter(o => otherMatch(o) && inView(o)).slice(0, 15);
   if(!S.pos) return [];
   /* 有定位但無搜尋：列出 600 米內、無實時數據的停車場 */
   const pos = [S.pos.lat, S.pos.lng];
   return S.others
+    .filter(inView)
     .map(o => ({o:o, d:distM(pos, [o.lat, o.lng])}))
     .filter(x => x.d < 600)
     .sort((a, b) => a.d - b.d)
@@ -1064,7 +1082,7 @@ function meterGroups(){
   /* 沒有定位時以目前地圖中心作參考，列表才會與畫面相關 */
   const ref = S.pos ? [S.pos.lat, S.pos.lng] : [map.getCenter().lat, map.getCenter().lng];
   S.meters.forEach(m => {
-    if(!meterMatch(m)) return;
+    if(!meterMatch(m) || !inView(m)) return;
     const o = S.occ.get(m.id);
     if(!o || o.meter === 'NU') return;
     if(S.onlyFree && o.s !== 'V') return;
@@ -1711,7 +1729,11 @@ map.on('moveend zoomend', () => {
   renderParksOnMap();
   renderOthersOnMap();
   clearTimeout(moveTimer);
-  moveTimer = setTimeout(renderMetersOnMap, 140);
+  moveTimer = setTimeout(() => {
+    renderMetersOnMap();
+    updateCounts();
+    if(!S.sel) S.tab === 'parks' ? renderParkList() : renderMeterList();
+  }, 140);
   /* 移到新區域：只有畫面上有場、而且資料過期，才補抓 */
   const v = viewStats();
   if((v.parks || v.others) && Date.now() - S.ts.vac > CFG.REFRESH_VAC && !S.busy.vac) refreshVacancy();

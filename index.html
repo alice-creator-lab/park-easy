@@ -266,6 +266,7 @@ a{color:var(--accent)}
 }
 .mrem.over{background:#7f1d1d}
 .mrem.up{transform:translate(-50%,-190%)}
+.mrem::before{content:'';position:absolute;inset:-8px;border-radius:50%}
 
 /* 有實時數字的補充停車場：小型數字標記，以便與政府停車場區分 */
 .pk2{
@@ -729,10 +730,11 @@ const STATUS_TXT = {
    ============================================================ */
 const map = L.map('map', {
   center: CFG.HK, zoom: 12, zoomControl:false, preferCanvas:true,
-  attributionControl:true, tap:true
+  attributionControl:true, tap:true, maxZoom: 20,
+  zoomSnap: 0.5, zoomDelta: 1
 });
 L.tileLayer(CFG.TILE, {
-  maxZoom: 19, subdomains: 'abc',
+  maxZoom: 20, maxNativeZoom: 19, subdomains: 'abc',
   attribution: '&copy; OpenStreetMap contributors ｜ 數據：data.gov.hk、運輸署'
 }).addTo(map);
 L.control.zoom({position:'bottomright'}).addTo(map);
@@ -910,7 +912,7 @@ function renderMetersOnMap(){
       continue;
     }
     meterLayer.addLayer(L.circleMarker([m.lat, m.lng], {
-      renderer: canvasRenderer, radius: 6, weight: 1.3, color:'#fff',
+      renderer: canvasRenderer, radius: z >= 19 ? 7 : 6, weight: 1.3, color:'#fff',
       fillColor: o.s === 'V' ? '#0e9f6e' : '#e02424', fillOpacity:.95, interactive:false
     }));
   }
@@ -1725,6 +1727,25 @@ map.on('click', e => {
 });
 
 let moveTimer = null;
+/* 撳空白位置時，自動選中最接近手指嘅咪錶位（手指誤差容許 22px） */
+map.on('click', ev => {
+  if(!S.show.meters || !S.occ.size) return;
+  const z = map.getZoom();
+  if(z < 17) return;
+  const t = ev.originalEvent && ev.originalEvent.target;
+  if(t && t.closest && t.closest('.leaflet-marker-icon')) return;   // 撳到標記，交由標記處理
+  const cp = ev.containerPoint, LIM = 22;
+  let best = null, bd = LIM;
+  for(const m of S.meters){
+    if(!map.getBounds().contains([m.lat, m.lng])) continue;
+    if(!S.occ.get(m.id)) continue;
+    const p = map.latLngToContainerPoint([m.lat, m.lng]);
+    const d = Math.hypot(p.x - cp.x, p.y - cp.y);
+    if(d < bd){ bd = d; best = m; }
+  }
+  if(best) showMeter(best, {fly:false});
+});
+
 map.on('moveend zoomend', () => {
   renderParksOnMap();
   renderOthersOnMap();

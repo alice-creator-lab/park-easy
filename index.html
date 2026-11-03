@@ -379,6 +379,7 @@ const CFG = {
   HK      : [22.34, 114.15],
   REFRESH_VAC  : 60e3,        // 停車場空位：每分鐘
   REFRESH_OCC  : 300e3,       // 咪錶佔用：每五分鐘
+  REFRESH_LIVE : 600e3,       // 補充場實時空位：每十分鐘
   TTL_INFO     : 12*3600e3,   // 靜態資料快取
   TTL_VAC      : 24*3600e3,   // 空位快照快取（離線時用）
   STALE_AFTER  : 45*60e3,     // 超過即標示為舊資料
@@ -471,6 +472,8 @@ const S = {
   others : [],             // 去重後嘅「其他停車場」
   live   : {},             // 補充場實時空位（id -> {n,cap,mins,at}）
   liveGen: '',             // 實時資料抓取時間
+  lastAct: Date.now(),     // 最後一次互動
+  tick   : 0,              // 60 秒心跳計數
   vacRaw : null,           // 最近一次取得的原始空位資料
   occ    : new Map(),      // spaceId -> {s:'V'|'O', t:epoch, meter:'N'|'NU'}
   pos    : null,
@@ -481,7 +484,7 @@ const S = {
   favOnly :false,
   fav    : loadFav(),
   sel    : null,
-  ts     : {info:0, vac:0, occ:0, meters:0},
+  ts     : {info:0, vac:0, occ:0, meters:0, live:0},
   busy   : {},
   errors : {}
 };
@@ -499,13 +502,14 @@ function saveFav(){
 /* ============================================================
    4. 資料來源
    ============================================================ */
+/* no-cache（唔係 no-store）：有 ETag 就回 304，內容冇變時 0 bytes */
 async function getJSON(url){
-  const r = await fetch(url, {cache:'no-store'});
+  const r = await fetch(url, {cache:'no-cache'});
   if(!r.ok) throw new Error(url + ' → HTTP ' + r.status);
   return r.json();
 }
 async function getText(url){
-  const r = await fetch(url, {cache:'no-store'});
+  const r = await fetch(url, {cache:'no-cache'});
   if(!r.ok) throw new Error(url + ' → HTTP ' + r.status);
   return r.text();
 }
@@ -630,6 +634,7 @@ async function loadLive(){
     const d = await getJSON(CFG.LIVE);
     S.live = (d && d.rows) || {};
     S.liveGen = (d && d.generated) || '';
+    S.ts.live = Date.parse(S.liveGen) || Date.now();
   }catch(e){ S.live = {}; S.liveGen = ''; }
   applyLive();
 }
@@ -1316,8 +1321,58 @@ function banner(msg){
   bannerTimer = setTimeout(() => el.classList.remove('show'), 9000);
 }
 
+/* 任何互動都算「仲喺度用」，用嚟決定更新頻率 */
+['touchstart', 'mousedown', 'keydown', 'wheel'].forEach(ev =>
+  window.addEventListener(ev, () => { S.lastAct = Date.now(); }, {passive:true}));
+
+/* ---------- 只更新「畫面睇得到」嘅資料，慳流量 ---------- */
+function viewStats(){
+  const b = map.getBounds();
+  let parks = 0, others = 0, live = 0;
+  for(const p of S.parks) if(b.contains([p.lat, p.lng])) parks++;
+  for(const o of S.others) if(b.contains([o.lat, o.lng])){ others++; if(o.vac != null) live++; }
+  return {parks:parks, others:others, live:live};
+}
+
+function metersOnScreen(){
+  if(S.sel && S.sel.kind === 'meter') return true;
+  if(!S.show.meters || S.tab !== 'meters' || map.getZoom() < 16) return false;
+  const b = map.getBounds();
+  for(let i = 0; i < S.meters.length; i++){
+    const m = S.meters[i];
+    if(b.contains([m.lat, m.lng])) return true;
+  }
+  return false;
+}
+
+function liveOnScreen(){
+  if(S.sel && S.sel.kind === 'other' && S.sel.data.vac != null) return true;
+  const b = map.getBounds();
+  return S.others.some(o => o.vac != null && b.contains([o.lat, o.lng]));
+}
+
+async function refreshLive(force){
+  if(S.busy.live) return;
+  if(!force && !liveOnScreen()) return;
+  S.busy.live = true;
+  try{
+    await loadLive();
+    renderOthersOnMap();
+    if(S.sel && S.sel.kind === 'other') showOther(S.sel.data, {fly:true});
+    else if(!S.sel) render();
+  }catch(e){
+    S.errors.live = true;
+  }finally{
+    S.busy.live = false;
+  }
+}
+
 async function refreshVacancy(force){
   if(S.busy.vac) return;
+  if(!force){
+    const v = viewStats();
+    if(!v.parks && !v.others) return;      // 畫面完全冇場：唔抓，慳流量
+  }
   S.busy.vac = true;
   if(!S.parks.length) setLive('busy', '載入中');
   try{
@@ -1338,6 +1393,7 @@ async function refreshVacancy(force){
 
 async function refreshOccupancy(force){
   if(S.busy.occ) return;
+  if(!force && S.occ.size && !metersOnScreen()) return;   // 睇唔到咪錶就唔抓 2MB CSV
   S.busy.occ = true;
   try{
     await loadOccupancy();
@@ -1604,6 +1660,11 @@ map.on('moveend zoomend', () => {
   renderOthersOnMap();
   clearTimeout(moveTimer);
   moveTimer = setTimeout(renderMetersOnMap, 140);
+  /* 移到新區域：只有畫面上有場、而且資料過期，才補抓 */
+  const v = viewStats();
+  if((v.parks || v.others) && Date.now() - S.ts.vac > CFG.REFRESH_VAC && !S.busy.vac) refreshVacancy();
+  if(metersOnScreen() && Date.now() - S.ts.occ > 120e3 && !S.busy.occ) refreshOccupancy();
+  if(v.live && Date.now() - S.ts.live > CFG.REFRESH_LIVE) refreshLive();
 });
 
 /* 回到前景：按需要更新 */
@@ -1611,6 +1672,7 @@ document.addEventListener('visibilitychange', () => {
   if(document.visibilityState !== 'visible') return;
   if(Date.now() - S.ts.vac > 90e3) refreshVacancy();
   if(S.show.meters && Date.now() - S.ts.occ > 120e3) refreshOccupancy();
+  if(liveOnScreen() && Date.now() - S.ts.live > 150e3) refreshLive();
 });
 window.addEventListener('resize', () => {
   if(window.innerWidth >= 900 && UI.collapsed) setCollapsed(false);
@@ -1622,7 +1684,10 @@ window.addEventListener('offline', () => setLive('err', '離線'));
 /* ============================================================
    12. 起動
    ============================================================ */
-window.__pe = {S:S, map:map, showPark:showPark, showMeter:showMeter, render:render, meterGroups:meterGroups, meterMatch:meterMatch};
+window.__pe = {S:S, map:map, showPark:showPark, showMeter:showMeter, render:render,
+  meterGroups:meterGroups, meterMatch:meterMatch,
+  refreshVacancy:refreshVacancy, refreshOccupancy:refreshOccupancy, refreshLive:refreshLive,
+  viewStats:viewStats, metersOnScreen:metersOnScreen, liveOnScreen:liveOnScreen};
 
 async function boot(){
   setFavChip();
@@ -1661,12 +1726,20 @@ async function boot(){
 
   if(S.show.meters) refreshOccupancy();
 
+  /* 有互動：每分鐘；靜態超過 2 分鐘：每 3 分鐘一次（慳流動數據） */
   setInterval(() => {
-    if(document.visibilityState === 'visible') refreshVacancy();
+    if(document.visibilityState !== 'visible') return;
+    const idle = Date.now() - S.lastAct > 120e3;
+    S.tick = (S.tick || 0) + 1;
+    if(idle && S.tick % 3) return;
+    refreshVacancy();
   }, CFG.REFRESH_VAC);
   setInterval(() => {
     if(S.show.meters && document.visibilityState === 'visible') refreshOccupancy();
   }, CFG.REFRESH_OCC);
+  setInterval(() => {
+    if(document.visibilityState === 'visible') refreshLive();
+  }, CFG.REFRESH_LIVE);
   /* 倒數每 30 秒更新一次，唔需要再抓資料 */
   setInterval(() => {
     if(document.visibilityState !== 'visible') return;

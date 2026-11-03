@@ -48,6 +48,17 @@ tools/shot.py          headless Chrome 截圖＋煙霧測試（需要本機 http
 
 信和系商場（荃新天地、屯門市廣場、奧海城、中港城、黃金海岸、朗壹廣場）有實時車位數，但只經商場 S+ 系統／第三方聚合 app 發佈。`tools/fetch_inpark.py` 讀 InPark AI 個場頁內嵌嘅 `liveVacancy` 物件（`data_state: live`、`source_system: sino_splus`），寫成 `data/live_extra.json`；`.github/workflows/live.yml` 每 10 分鐘跑一次，有變動才 commit，Pages 自動更新。冇實時數字嘅場照樣顯示位置＋收費，UI 唔會扮有數。
 
+### 慳數據（只更新畫面睇得到嘅嘢）
+
+| 資料 | 大小 | 幾時抓 |
+| --- | --- | --- |
+| 停車場空位（API） | ~100 KB（冇 ETag，冇得 304） | 畫面有停車場先抓；有互動每 60 秒，靜態超過 2 分鐘變每 3 分鐘 |
+| 咪錶佔用 CSV | ~719 KB（有 ETag → 冇變回 304） | 只有喺咪錶分頁、z ≥ 16、畫面有咪錶位，或者開住咪錶詳情，才每 5 分鐘抓 |
+| 補充場實時（InPark） | ~1.5 KB | 每 10 分鐘，只喺畫面有信和場或開住佢詳情才抓 |
+| `data/meters.json` | ~2 MB | 開頁一次（之後靠 localStorage／HTTP cache） |
+
+移動地圖時，如果新區域有場、而資料已經超過 60 秒，先會補抓一次；切走 app 再返嚟亦只會喺必要時更新。
+
 要加新場：喺 `data/parks_extra.json` 加一筆（`id, name, lat, lng, addr, tel, fee, site, ev, source`），座標可以用香港政府地址資料庫 <https://www.als.gov.hk/lookup?q=地址> 查，`source` 寫你查邊個官網，`checked` 更新日期。
 
 ## 本機執行

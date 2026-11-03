@@ -819,7 +819,7 @@ function renderParksOnMap(){
       icon: p.status === 'closed' ? closedIcon() : parkIcon(p),
       title: p.name, keyboard:false, riseOnHover:true, bubblingMouseEvents:false
     });
-    mk.on('click', () => showPark(p, {fly:false}));
+    mk.on('click', () => { if(tapOk()) showPark(p, {fly:false}); });
     parkLayer.addLayer(mk);
   });
 }
@@ -854,7 +854,7 @@ function renderOthersOnMap(){
     const mk = L.marker([o.lat, o.lng], {
       icon: otherIcon(hit, o), title:o.name, keyboard:false, bubblingMouseEvents:false
     });
-    mk.on('click', () => showOther(o));
+    mk.on('click', () => { if(tapOk()) showOther(o); });
     otherLayer.addLayer(mk);
   });
 }
@@ -920,7 +920,7 @@ function renderMetersOnMap(){
     const rem = o.s === 'O' ? meterRemain(m) : null;
     if(ballIds && ballIds.has(m.id) && rem != null){
       const mk = L.marker([m.lat, m.lng], {icon: remIcon(rem, m.id, Math.floor(i) % 2 === 1), keyboard:false, bubblingMouseEvents:false});
-      mk.on('click', () => showMeter(m));
+      mk.on('click', () => { if(tapOk()) showMeter(m); });
       meterLayer.addLayer(mk);
       continue;
     }
@@ -1017,6 +1017,8 @@ function updateCounts(){
   $('#nMeters').textContent = S.meters.length ? num(c.meters) : '–';
   if(S.parks.length || S.meters.length){
     $('#hdr').textContent = num(c.parks) + ' 個停車場 · ' + num(c.meters) + ' 個咪錶位（畫面範圍）';
+    const gt = $('#grab .gtxt');
+    if(gt) gt.textContent = '泊車資料 · ' + num(c.parks) + ' 個停車場';
   }
 }
 function parkMatch(p){
@@ -1776,28 +1778,16 @@ $('#refresh').addEventListener('click', () => {
   if(S.show.meters) refreshOccupancy(true);
 });
 
-/* 點地圖空白處：就近揀咪錶位 */
-map.on('click', e => {
-  if(!S.show.meters || map.getZoom() < 16 || !S.occ.size) return;
-  const z = map.getZoom();
-  const pt = map.project(e.latlng, z);
-  const b = map.getBounds();
-  let best = null, bestD = 30;
-  for(const m of S.meters){
-    if(m.lat < b.getSouth() || m.lat > b.getNorth() || m.lng < b.getWest() || m.lng > b.getEast()) continue;
-    const o = S.occ.get(m.id);
-    if(!o || o.meter === 'NU') continue;
-    if(S.q && !meterMatch(m)) continue;
-    const q = map.project([m.lat, m.lng], z);
-    const d = Math.abs(q.x - pt.x) + Math.abs(q.y - pt.y);
-    if(d < bestD){ bestD = d; best = m; }
-  }
-  if(best) showMeter(best);
-});
-
 let moveTimer = null;
-/* 撳空白位置時，自動選中最接近手指嘅咪錶位（手指誤差容許 22px） */
+/* 拖動或縮放後 0.4 秒內的「撳」一律當作手勢餘波，避免無故彈出詳情 */
+let movedAt = 0;
+map.on('movestart', () => { movedAt = Date.now(); });
+map.on('moveend zoomend', () => { movedAt = Date.now(); });
+function tapOk(){ return Date.now() - movedAt > 400; }
+
+/* 撳空白位置時，自動選中最接近手指的咪錶位（手指誤差容許 22px） */
 map.on('click', ev => {
+  if(!tapOk()) return;
   if(!S.show.meters || !S.occ.size) return;
   const z = map.getZoom();
   if(z < 17) return;
@@ -1858,6 +1848,8 @@ window.__pe = {S:S, map:map, showPark:showPark, showMeter:showMeter, render:rend
 async function boot(){
   setFavChip();
   applySheet();
+  /* 手機首次載入：只顯示底部細條，撳三角形才彈出資料 */
+  if(window.innerWidth < 900) setCollapsed(true);
   window.addEventListener('resize', applySheet);
   if(window.visualViewport) window.visualViewport.addEventListener('resize', applySheet);
 

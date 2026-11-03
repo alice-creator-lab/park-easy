@@ -863,7 +863,7 @@ function renderMetersOnMap(){
 }
 
 function syncLayers(){
-  /* remove→add 令停車場層永遠喺咪錶層之上 */
+  /* remove→add 使停車場圖層永遠位於咪錶圖層之上 */
   map.removeLayer(parkLayer);
   map.removeLayer(otherLayer);
   S.show.meters ? map.addLayer(meterLayer) : map.removeLayer(meterLayer);
@@ -1321,7 +1321,7 @@ function banner(msg){
   bannerTimer = setTimeout(() => el.classList.remove('show'), 9000);
 }
 
-/* 任何互動都算「仲喺度用」，用嚟決定更新頻率 */
+/* 任何互動均視為「仍在使用」，用以決定更新頻率 */
 ['touchstart', 'mousedown', 'keydown', 'wheel'].forEach(ev =>
   window.addEventListener(ev, () => { S.lastAct = Date.now(); }, {passive:true}));
 

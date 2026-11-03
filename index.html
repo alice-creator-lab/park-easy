@@ -1767,6 +1767,7 @@ $('#grab').addEventListener('click', e => {
   e.preventDefault();
   const now = Date.now();
   if(now - grabAt < 350) return;                   // 擋 iOS 重複觸發
+  if(!tapOk()) return;                             // 拖動後立即的誤觸不理會
   grabAt = now;
   setCollapsed(!UI.collapsed);
 });
@@ -1779,15 +1780,41 @@ $('#refresh').addEventListener('click', () => {
 });
 
 let moveTimer = null;
-/* 拖動或縮放後 0.4 秒內的「撳」一律當作手勢餘波，避免無故彈出詳情 */
-let movedAt = 0;
-map.on('movestart', () => { movedAt = Date.now(); });
-map.on('moveend zoomend', () => { movedAt = Date.now(); });
-function tapOk(){ return Date.now() - movedAt > 400; }
+/* 手勢餘波防護：iPhone 在拖動結束後會補發一個 click（時間不定），
+   這個 click 經常誤中標記或底部細條，造成「泊車資料無故彈出」。
+   做法：以「上一次觸控是否拖動過」判斷，而不是用時間窗。
+   只要上一次觸控移動超過 8px，其後補發的 click 一律攔截；
+   下一次真正的手指按下會即時清除標記，所以正常的撳仍可立即使用。 */
+let gestureUntil = 0;        /* Leaflet 程式化移動（flyTo、setView）後的短暫封鎖 */
+let gestureDirty = false;    /* 上一次觸控是拖動，未經新的觸控清除 */
+(function(){
+  let st = null;
+  document.addEventListener('touchstart', e => {
+    const t = e.touches && e.touches[0];
+    if(t){ st = {x:t.clientX, y:t.clientY}; gestureDirty = false; }
+  }, {capture:true, passive:true});
+  document.addEventListener('touchmove', e => {
+    const t = e.touches && e.touches[0];
+    if(!st || !t) return;
+    if(Math.hypot(t.clientX - st.x, t.clientY - st.y) > 8) gestureDirty = true;
+  }, {capture:true, passive:true});
+  document.addEventListener('touchend', () => { st = null; }, {capture:true, passive:true});
+})();
+map.on('dragstart zoomstart movestart', () => { gestureUntil = Math.max(gestureUntil, Date.now() + 200); });
+map.on('dragend zoomend moveend', () => { gestureUntil = Math.max(gestureUntil, Date.now() + 300); });
+function tapOk(){ return !gestureDirty && Date.now() >= gestureUntil; }
+document.addEventListener('click', e => {
+  if(!gestureDirty && Date.now() >= gestureUntil) return;
+  const t = e.target;
+  if(t && t.closest && (t.closest('.leaflet-container') || t.closest('#sheet'))){
+    e.stopPropagation();
+    e.preventDefault();
+  }
+}, true);
 
 /* 撳空白位置時，自動選中最接近手指的咪錶位（手指誤差容許 22px） */
 map.on('click', ev => {
-  if(!tapOk()) return;
+  if(!tapOk() || UI.collapsed) return;      /* 收起狀態不主動彈出詳情 */
   if(!S.show.meters || !S.occ.size) return;
   const z = map.getZoom();
   if(z < 17) return;
@@ -1843,7 +1870,8 @@ window.addEventListener('offline', () => { if(!S.ts.vac) setLive('err', '—'); 
 window.__pe = {S:S, map:map, showPark:showPark, showMeter:showMeter, render:render,
   meterGroups:meterGroups, meterMatch:meterMatch,
   refreshVacancy:refreshVacancy, refreshOccupancy:refreshOccupancy, refreshLive:refreshLive,
-  viewStats:viewStats, metersOnScreen:metersOnScreen, liveOnScreen:liveOnScreen};
+  viewStats:viewStats, metersOnScreen:metersOnScreen, liveOnScreen:liveOnScreen,
+  gestureLeft:() => Math.round(gestureUntil - Date.now()), gestureDirty:() => gestureDirty};
 
 async function boot(){
   setFavChip();

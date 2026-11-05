@@ -12,6 +12,7 @@
 - **搜尋**：停車場名稱、地址、地區、街道；輸入兩個字以上會自動調整地圖至結果範圍
 - **畫面範圍統計**：停車場／咪錶位數目及下方列表只計算目前地圖可見範圍；縮小至全港時顯示全部
 - **收藏**：以星號收藏常用停車場，可只顯示收藏
+- **隧道收費**：右上角隧道圖示開啟收費面板；過海隧道及大欖隧道按香港時間即時顯示現時收費、有效至幾點、下一段收費，並可展開當日各時段；獅子山、城門、香港仔、大老山、青沙管制區顯示固定收費
 - **定位**：於 iOS／Android 瀏覽器定位後，列表自動按距離排序
 - **離線**：空位快照及停車場靜態資料會存於 localStorage；離線或 API 故障時顯示上一次資料，並標示「資料舊」
 
@@ -23,6 +24,8 @@
 | 咪錶位置、收費、時限 | 運輸署 metered parking spaces CSV（經 `tools/build_meters.py` 精簡） |
 | 咪錶佔用狀況 | 運輸署 `occupancystatus.csv` |
 | 補充停車場（無實時空位） | `data/parks_extra.json`（逐個查核官網）＋ `data/parks_osm.json`（OpenStreetMap，ODbL） |
+| 隧道收費 | 運輸署「道路網絡（第二代）」`TUN_BRIDGE_TOLL.csv`（固定收費）及 `TUN_BRIDGE_TV_TOLL.csv`（分時段收費），經 `tools/build_tolls.py` 整理成 `data/tolls.json` |
+| 公眾假期 | 1823 香港公眾假期（同日別 B 收費） |
 | 底圖 | OpenStreetMap |
 
 ## 檔案
@@ -33,10 +36,13 @@ data/meters.json       20,699 個咪錶位（id, 座標, 街道, 地區, 車種,
 data/parks_extra.json  政府數據未收錄的停車場（`inpark` 欄目指向 InPark AI 的停車場 id）
 data/live_extra.json   上述停車場的實時空位快照（由 GitHub Actions 每 10 分鐘更新）
 data/parks_osm.json    OpenStreetMap 有名稱的停車場（608 個，無實時空位）
+data/tolls.json        隧道及橋樑收費（分時段 A／B 別、固定收費、公眾假期日期）
 tools/build_meters.py  由運輸署 CSV 重建 data/meters.json
 tools/build_osm_parks.py 由 Overpass 重建 data/parks_osm.json
 tools/fetch_inpark.py  由 InPark AI 停車場頁面抽取 liveVacancy，寫入 data/live_extra.json
+tools/build_tolls.py   由運輸署兩個收費 CSV 及 1823 公眾假期建立 data/tolls.json
 .github/workflows/live.yml  每 10 分鐘執行 fetch_inpark.py，並在有變動時提交快照
+.github/workflows/tolls.yml 每月重建 data/tolls.json（收費或假期有變動才提交）
 tools/shot.py          headless Chrome 截圖及煙霧測試（需要本機 http server）
 ```
 

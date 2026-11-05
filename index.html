@@ -324,6 +324,37 @@ a{color:var(--accent)}
   #sheet{transition:none}
   .live.busy i{animation:none}
 }
+
+/* ---------- 隧道收費 ---------- */
+#tolls{position:fixed;inset:0;z-index:9000;display:none;background:rgba(15,23,42,.45)}
+#tolls.on{display:flex;align-items:flex-end;justify-content:center}
+#tolls .tcard{width:100%;max-width:520px;max-height:88vh;display:flex;flex-direction:column;background:#fff;border-radius:16px 16px 0 0;box-shadow:0 -8px 30px rgba(15,23,42,.3)}
+.thead{display:flex;align-items:center;gap:8px;padding:14px 14px 8px}
+.thead b{font-size:16px}
+.tday{font-size:11px;color:#64748b;background:#f1f5f9;border-radius:999px;padding:3px 8px}
+.tx{margin-left:auto;border:0;background:#f1f5f9;width:30px;height:30px;border-radius:50%;font-size:14px;color:#334155;cursor:pointer}
+.tcls{display:flex;gap:6px;padding:0 14px 10px;overflow-x:auto}
+.tcls button{flex:0 0 auto;border:1px solid #cbd5e1;background:#fff;color:#334155;border-radius:999px;padding:6px 12px;font-size:12.5px;font-weight:600;cursor:pointer}
+.tcls button.on{background:#0f172a;border-color:#0f172a;color:#fff}
+.tbody{overflow:auto;padding:0 14px 6px;-webkit-overflow-scrolling:touch;padding-bottom:calc(6px + env(safe-area-inset-bottom))}
+.trow{border:1px solid #e2e8f0;border-radius:12px;padding:11px 12px;margin-bottom:9px}
+.trow h3{margin:0;font-size:14px;display:flex;align-items:baseline;gap:8px}
+.trow .now{margin-left:auto;font-size:19px;font-weight:800;color:#0f172a;font-variant-numeric:tabular-nums}
+.trow .meta{font-size:11.5px;color:#64748b;margin-top:3px;line-height:1.5}
+.trow .next{color:#0e7490;font-weight:700}
+.trow .others{font-size:11.5px;color:#475569;margin-top:5px;line-height:1.5}
+.trow details{margin-top:8px;border-top:1px dashed #e2e8f0;padding-top:6px}
+.trow summary{font-size:11.5px;color:#2563eb;cursor:pointer}
+.tbands{margin:6px 0 0;padding:0;list-style:none;font-size:11.5px;color:#334155;max-height:180px;overflow:auto}
+.tbands li{display:flex;gap:8px;padding:2px 0;font-variant-numeric:tabular-nums}
+.tbands li.on{font-weight:800;color:#0e7490}
+.tbands li span:last-child{margin-left:auto}
+.tsect{margin:2px 0 8px;font-size:12px;font-weight:700;color:#475569}
+.tfoot{padding:8px 14px calc(12px + env(safe-area-inset-bottom));font-size:10.5px;color:#94a3b8;line-height:1.5;border-top:1px solid #f1f5f9}
+@media(min-width:900px){
+  #tolls.on{align-items:center}
+  #tolls .tcard{border-radius:16px;max-height:82vh}
+}
 </style>
 </head>
 <body>
@@ -354,6 +385,11 @@ a{color:var(--accent)}
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
         <circle cx="12" cy="12" r="6.5"></circle><circle cx="12" cy="12" r="1.8" fill="currentColor" stroke="none"></circle>
         <path d="M12 2v3M12 19v3M2 12h3M19 12h3"></path>
+      </svg>
+    </button>
+    <button class="iconbtn" id="tollBtn" title="隧道收費" aria-label="隧道收費">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+        <path d="M4 20v-7a8 8 0 0 1 16 0v7"></path><path d="M8 20v-6.5a4 4 0 0 1 8 0V20" stroke-dasharray="2 2.6"></path>
       </svg>
     </button>
   </div>
@@ -389,6 +425,24 @@ a{color:var(--accent)}
   <div id="list"><div class="empty">正在載入泊車數據…</div></div>
 </section>
 
+
+<div id="tolls" aria-hidden="true">
+  <div class="tcard" role="dialog" aria-modal="true" aria-label="隧道收費">
+    <div class="thead">
+      <b>隧道收費</b>
+      <span class="tday" id="tollDay">—</span>
+      <button class="tx" id="tollClose" aria-label="關閉隧道收費">✕</button>
+    </div>
+    <div class="tcls" id="tollCls" role="group" aria-label="車輛類別">
+      <button data-c="PC" class="on">私家車</button>
+      <button data-c="MC">電單車</button>
+      <button data-c="TA">的士</button>
+      <button data-c="OTH">其他車輛</button>
+    </div>
+    <div class="tbody" id="tollBody"><div class="empty">載入隧道收費…</div></div>
+    <div class="tfoot" id="tollFoot"></div>
+  </div>
+</div>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 (function(){
@@ -1887,6 +1941,144 @@ window.addEventListener('resize', () => {
 window.addEventListener('online',  () => { if(S.errors.vac) refreshVacancy(); });
 window.addEventListener('offline', () => { if(!S.ts.vac) setLive('err', '—'); });
 
+
+/* ============================================================
+   11b. 隧道收費
+   資料：運輸署「道路網絡（第二代）」TUN_BRIDGE_TOLL / TUN_BRIDGE_TV_TOLL
+   分時段收費按裝置時間即時計算，每 30 秒重算一次
+   ============================================================ */
+const TOLL = {data:null, cls:'PC', timer:null, loading:null};
+const TVIDX = {MC:2, PC:3, TA:4, OTH:5};
+const TNAME = {PC:'私家車', MC:'電單車', TA:'的士', OTH:'其他車輛'};
+
+function p2(n){ return String(n).padStart(2, '0'); }
+/* 一律用香港時間判斷時段，避免裝置時區不同（外遊、手機未自動調時區）而收費出錯 */
+function hkClock(offsetDays){
+  const t = new Date(Date.now() + (offsetDays || 0) * 86400000);
+  const f = new Intl.DateTimeFormat('en-GB', {timeZone:'Asia/Hong_Kong', hourCycle:'h23',
+    year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', second:'2-digit'});
+  const o = {};
+  f.formatToParts(t).forEach(x => { if(x.type !== 'literal') o[x.type] = x.value; });
+  const y = +o.year, m = +o.month, d = +o.day;
+  return { y:y, m:m, d:d, hh:+o.hour, mm:+o.minute, ss:+o.second,
+           dow: new Date(Date.UTC(y, m - 1, d)).getUTCDay(),
+           key: y + '-' + p2(m) + '-' + p2(d),
+           hms: p2(+o.hour) + ':' + p2(+o.minute) + ':' + p2(+o.second),
+           hm: p2(+o.hour) + ':' + p2(+o.minute) };
+}
+function tollDayType(clock){
+  if(clock.dow === 0) return 'B';                        // 星期日
+  const hol = (TOLL.data && TOLL.data.holidays) || [];
+  return hol.indexOf(clock.key) >= 0 ? 'B' : 'A';        // 公眾假期同星期日收費
+}
+function tollHM(t){ return String(t || '').slice(0, 5); }
+function tollMoney(v){ return v == null ? '—' : '$' + (Number.isInteger(v) ? v : v.toFixed(1)); }
+function tollBandIndex(bands, hms){
+  for(let i = 0; i < bands.length; i++){
+    if(hms >= bands[i][0] && hms <= bands[i][1]) return i;
+  }
+  return -1;
+}
+
+async function loadTolls(){
+  if(TOLL.data) return TOLL.data;
+  if(TOLL.loading) return TOLL.loading;
+  TOLL.loading = (async () => {
+    try{ TOLL.data = await getJSON('data/tolls.json'); }
+    catch(e){ TOLL.data = null; }
+    TOLL.loading = null;
+    return TOLL.data;
+  })();
+  return TOLL.loading;
+}
+
+function tollCard(t){
+  const clock = hkClock(), day = tollDayType(clock);
+  const bands = t[day] || [], hms = clock.hms, cls = TOLL.cls;
+  const i = tollBandIndex(bands, hms);
+  const price = i >= 0 ? bands[i][TVIDX[cls]] : null;
+  let next = null;
+  if(i >= 0 && i + 1 < bands.length){
+    next = {time: bands[i + 1][0], v: bands[i + 1][TVIDX[cls]]};
+  }else if(bands.length){
+    const nb = t[tollDayType(hkClock(1))] || [];
+    if(nb.length) next = {time: nb[0][0], v: nb[0][TVIDX[cls]], tomorrow:true};
+  }
+  const others = Object.keys(TVIDX).filter(c => c !== cls)
+    .map(c => TNAME[c] + ' ' + tollMoney(i >= 0 ? bands[i][TVIDX[c]] : null)).join(' · ');
+  const rows = bands.map((b, k) => '<li class="' + (k === i ? 'on' : '') + '"><span>' + tollHM(b[0]) + '–'
+    + tollHM(b[1]) + '</span><span>' + tollMoney(b[TVIDX[cls]]) + '</span></li>').join('');
+  return '<div class="trow"><h3>' + esc(t.name) + '<span class="now">' + tollMoney(price) + '</span></h3>'
+    + '<div class="meta">' + esc(TNAME[cls]) + ' · '
+    + (i >= 0 ? '有效至 ' + tollHM(bands[i][1]) : '目前時段未有資料')
+    + (next ? ' · <span class="next">' + (next.tomorrow ? '明日 ' : '') + tollHM(next.time) + ' 起 ' + tollMoney(next.v) + '</span>' : '')
+    + '</div><div class="others">' + others + '</div>'
+    + '<details><summary>今日各時段</summary><ul class="tbands">' + rows + '</ul></details></div>';
+}
+
+function tollFixedCard(t){
+  const tolls = t.tolls || {}, cls = TOLL.cls;
+  const v = tolls[cls] != null ? tolls[cls] : null;
+  const vals = Object.keys(tolls).map(k => tolls[k]);
+  const uniform = vals.length > 1 && vals.every(x => x === vals[0]);
+  const detail = uniform
+    ? '所有車種 ' + tollMoney(vals[0])
+    : Object.keys(tolls).map(k => (TOLL.data.classes[k] || k) + ' ' + tollMoney(tolls[k])).join(' · ');
+  return '<div class="trow"><h3>' + esc(t.name) + '<span class="now">' + tollMoney(v) + '</span></h3>'
+    + '<div class="meta">固定收費 · 全日相同</div><div class="others">' + detail + '</div></div>';
+}
+
+function renderTolls(){
+  const body = $('#tollBody');
+  if(!body) return;
+  const d = TOLL.data;
+  if(!d){
+    body.innerHTML = '<div class="empty">隧道收費資料載入失敗，請檢查網絡後再試</div>';
+    $('#tollFoot').textContent = '';
+    return;
+  }
+  const clock = hkClock();
+  $('#tollDay').textContent = (tollDayType(clock) === 'B' ? '星期日及公眾假期收費' : '星期一至六收費')
+    + ' · ' + clock.hm;
+  body.innerHTML = '<div class="tsect">分時段收費（現在）</div>'
+    + (d.tv || []).map(tollCard).join('')
+    + '<div class="tsect">固定收費隧道</div>'
+    + (d.fixed || []).map(tollFixedCard).join('');
+  $('#tollFoot').textContent = '資料來源：' + (d.source || '運輸署開放數據')
+    + '。收費每 30 秒按裝置時間重算；公眾假期依 1823 公布。';
+  $$('#tollCls button').forEach(b => b.classList.toggle('on', b.dataset.c === TOLL.cls));
+}
+
+async function openTolls(){
+  const box = $('#tolls');
+  if(!box) return;
+  box.classList.add('on');
+  box.setAttribute('aria-hidden', 'false');
+  if(!TOLL.data){
+    $('#tollBody').innerHTML = '<div class="empty">載入隧道收費…</div>';
+    await loadTolls();
+  }
+  renderTolls();
+  clearInterval(TOLL.timer);
+  TOLL.timer = setInterval(() => { if(box.classList.contains('on')) renderTolls(); }, 30000);
+}
+function closeTolls(){
+  const box = $('#tolls');
+  if(!box) return;
+  box.classList.remove('on');
+  box.setAttribute('aria-hidden', 'true');
+  clearInterval(TOLL.timer);
+  TOLL.timer = null;
+}
+
+$('#tollBtn').addEventListener('click', openTolls);
+$('#tollClose').addEventListener('click', closeTolls);
+$('#tolls').addEventListener('click', e => { if(e.target.id === 'tolls') closeTolls(); });
+$$('#tollCls button').forEach(b => b.addEventListener('click', () => {
+  TOLL.cls = b.dataset.c;
+  renderTolls();
+}));
+
 /* ============================================================
    12. 起動
    ============================================================ */
@@ -1894,7 +2086,8 @@ window.__pe = {S:S, map:map, showPark:showPark, showMeter:showMeter, render:rend
   meterGroups:meterGroups, meterMatch:meterMatch,
   refreshVacancy:refreshVacancy, refreshOccupancy:refreshOccupancy, refreshLive:refreshLive,
   viewStats:viewStats, metersOnScreen:metersOnScreen, liveOnScreen:liveOnScreen,
-  gestureLeft:() => Math.round(gestureUntil - Date.now()), gestureDirty:() => gestureDirty};
+  gestureLeft:() => Math.round(gestureUntil - Date.now()), gestureDirty:() => gestureDirty,
+  toll:{open:openTolls, close:closeTolls, render:renderTolls, state:TOLL}};
 
 async function boot(){
   setFavChip();

@@ -1,0 +1,31 @@
+name: tolls
+
+on:
+  schedule:
+    - cron: "0 3 1 * *"      # 每月 1 日 11:00 HKT 更新收費及公眾假期
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: 重建隧道收費資料
+        run: python3 tools/build_tolls.py
+      - name: 有變動才提交
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet -- data/tolls.json; then
+            echo "沒有變動"
+            exit 0
+          fi
+          git add data/tolls.json
+          git commit -m "chore(隧道收費): 更新運輸署收費及公眾假期"
+          git push

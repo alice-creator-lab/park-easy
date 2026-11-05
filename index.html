@@ -333,18 +333,33 @@ a{color:var(--accent)}
 .thead b{font-size:16px}
 .tday{font-size:11px;color:#64748b;background:#f1f5f9;border-radius:999px;padding:3px 8px}
 .tx{margin-left:auto;border:0;background:#f1f5f9;width:30px;height:30px;border-radius:50%;font-size:14px;color:#334155;cursor:pointer}
-.tcls{display:flex;gap:6px;padding:0 14px 10px;overflow-x:auto}
-.tcls button{flex:0 0 auto;border:1px solid #cbd5e1;background:#fff;color:#334155;border-radius:999px;padding:6px 12px;font-size:12.5px;font-weight:600;cursor:pointer}
+.tcls{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;padding:0 14px 10px}
+.tcls button{width:100%;border:1px solid #cbd5e1;background:#fff;color:#334155;border-radius:10px;
+  padding:8px 2px;font-size:12.5px;font-weight:600;line-height:1.15;text-align:center;white-space:nowrap;
+  font-family:inherit;cursor:pointer;-webkit-appearance:none}
 .tcls button.on{background:#0f172a;border-color:#0f172a;color:#fff}
-.tbody{overflow:auto;padding:0 14px 6px;-webkit-overflow-scrolling:touch;padding-bottom:calc(6px + env(safe-area-inset-bottom))}
-.trow{border:1px solid #e2e8f0;border-radius:12px;padding:11px 12px;margin-bottom:9px}
-.trow h3{margin:0;font-size:14px;display:flex;align-items:baseline;gap:8px}
-.trow .now{margin-left:auto;font-size:19px;font-weight:800;color:#0f172a;font-variant-numeric:tabular-nums}
-.trow .meta{font-size:11.5px;color:#64748b;margin-top:3px;line-height:1.5}
-.trow .next{color:#0e7490;font-weight:700}
-.trow .others{font-size:11.5px;color:#475569;margin-top:5px;line-height:1.5}
-.trow details{margin-top:8px;border-top:1px dashed #e2e8f0;padding-top:6px}
-.trow summary{font-size:11.5px;color:#2563eb;cursor:pointer}
+.tbody{overflow:auto;padding:0 12px 6px;-webkit-overflow-scrolling:touch;padding-bottom:calc(6px + env(safe-area-inset-bottom))}
+.tsect{margin:2px 2px 7px;font-size:12px;font-weight:700;color:#475569}
+.trow{border:1px solid #e2e8f0;border-radius:12px;padding:0 10px;margin-bottom:7px;background:#fff}
+.trow summary,.trow.fixed{display:flex;align-items:center;gap:9px;padding:8px 0;list-style:none;cursor:pointer}
+.trow summary::-webkit-details-marker{display:none}
+.trow summary::marker{content:''}
+.tlogo{width:46px;height:28px;flex:none}
+.tinfo{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+.tinfo b{font-size:13.5px;font-weight:700;color:#0f172a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tinfo i{font-style:normal;font-size:11px;color:#64748b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tprice{font-size:18px;font-weight:800;color:#0e7490;font-variant-numeric:tabular-nums;flex:none}
+.trow details{margin:0}
+.tbands{margin:0 0 9px;padding:8px 0 0;list-style:none;font-size:11.5px;color:#334155;max-height:170px;overflow:auto;border-top:1px dashed #e2e8f0}
+.tbands li{display:flex;gap:8px;padding:2px 0;font-variant-numeric:tabular-nums}
+.tbands li.on{font-weight:800;color:#0e7490}
+.tbands li span:last-child{margin-left:auto}
+.tfix{border:1px solid #e2e8f0;border-radius:12px;margin-top:2px}
+.tfix>summary{padding:10px 12px;font-size:12.5px;font-weight:700;color:#334155;cursor:pointer;list-style:none}
+.tfix>summary::-webkit-details-marker{display:none}
+.tfix>summary::after{content:'▾';float:right;color:#94a3b8}
+.tfix[open]>summary::after{content:'▴'}
+.tfixbody{padding:0 10px}
 .tbands{margin:6px 0 0;padding:0;list-style:none;font-size:11.5px;color:#334155;max-height:180px;overflow:auto}
 .tbands li{display:flex;gap:8px;padding:2px 0;font-variant-numeric:tabular-nums}
 .tbands li.on{font-weight:800;color:#0e7490}
@@ -1992,6 +2007,18 @@ async function loadTolls(){
   return TOLL.loading;
 }
 
+/* 標示牌圖示：藍底、白色隧道拱門、黃色幹線編號盾 */
+function tollLogo(t){
+  const r = t.route;
+  const badge = (r == null) ? ''
+    : '<rect x="27" y="5" width="15" height="18" rx="4" fill="#f2d21a" stroke="#2f7d32" stroke-width="1.8"/>'
+      + '<text x="34.5" y="18.4" text-anchor="middle" font-size="11.5" font-weight="800" fill="#1a1a1a">' + r + '</text>';
+  return '<svg class="tlogo" viewBox="0 0 46 28" aria-hidden="true">'
+    + '<rect x="0.5" y="0.5" width="45" height="27" rx="6" fill="#2a55c5"/>'
+    + '<path d="M9 23.5V16.5a7 7 0 0 1 14 0v7" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/>'
+    + badge + '</svg>';
+}
+
 function tollCard(t){
   const clock = hkClock(), day = tollDayType(clock);
   const bands = t[day] || [], hms = clock.hms, cls = TOLL.cls;
@@ -2004,28 +2031,24 @@ function tollCard(t){
     const nb = t[tollDayType(hkClock(1))] || [];
     if(nb.length) next = {time: nb[0][0], v: nb[0][TVIDX[cls]], tomorrow:true};
   }
-  const others = Object.keys(TVIDX).filter(c => c !== cls)
-    .map(c => TNAME[c] + ' ' + tollMoney(i >= 0 ? bands[i][TVIDX[c]] : null)).join(' · ');
+  const meta = (i >= 0 ? '有效至 ' + tollHM(bands[i][1]) : '目前時段未有資料')
+    + (next ? ' · ' + (next.tomorrow ? '明日 ' : '') + tollHM(next.time) + ' 起 ' + tollMoney(next.v) : '');
   const rows = bands.map((b, k) => '<li class="' + (k === i ? 'on' : '') + '"><span>' + tollHM(b[0]) + '–'
     + tollHM(b[1]) + '</span><span>' + tollMoney(b[TVIDX[cls]]) + '</span></li>').join('');
-  return '<div class="trow"><h3>' + esc(t.name) + '<span class="now">' + tollMoney(price) + '</span></h3>'
-    + '<div class="meta">' + esc(TNAME[cls]) + ' · '
-    + (i >= 0 ? '有效至 ' + tollHM(bands[i][1]) : '目前時段未有資料')
-    + (next ? ' · <span class="next">' + (next.tomorrow ? '明日 ' : '') + tollHM(next.time) + ' 起 ' + tollMoney(next.v) + '</span>' : '')
-    + '</div><div class="others">' + others + '</div>'
-    + '<details><summary>今日各時段</summary><ul class="tbands">' + rows + '</ul></details></div>';
+  return '<details class="trow"><summary>' + tollLogo(t)
+    + '<span class="tinfo"><b>' + esc(t.name) + '</b><i>' + meta + '</i></span>'
+    + '<span class="tprice">' + tollMoney(price) + '</span></summary>'
+    + '<ul class="tbands">' + rows + '</ul></details>';
 }
 
 function tollFixedCard(t){
   const tolls = t.tolls || {}, cls = TOLL.cls;
-  const v = tolls[cls] != null ? tolls[cls] : null;
   const vals = Object.keys(tolls).map(k => tolls[k]);
   const uniform = vals.length > 1 && vals.every(x => x === vals[0]);
-  const detail = uniform
-    ? '所有車種 ' + tollMoney(vals[0])
-    : Object.keys(tolls).map(k => (TOLL.data.classes[k] || k) + ' ' + tollMoney(tolls[k])).join(' · ');
-  return '<div class="trow"><h3>' + esc(t.name) + '<span class="now">' + tollMoney(v) + '</span></h3>'
-    + '<div class="meta">固定收費 · 全日相同</div><div class="others">' + detail + '</div></div>';
+  const v = tolls[cls] != null ? tolls[cls] : (uniform ? vals[0] : null);
+  return '<div class="trow fixed">' + tollLogo(t)
+    + '<span class="tinfo"><b>' + esc(t.name) + '</b><i>全日相同</i></span>'
+    + '<span class="tprice">' + tollMoney(v) + '</span></div>';
 }
 
 function renderTolls(){
@@ -2040,10 +2063,10 @@ function renderTolls(){
   const clock = hkClock();
   $('#tollDay').textContent = (tollDayType(clock) === 'B' ? '星期日及公眾假期收費' : '星期一至六收費')
     + ' · ' + clock.hm;
-  body.innerHTML = '<div class="tsect">分時段收費（現在）</div>'
+  body.innerHTML = '<div class="tsect">分時段收費 · ' + esc(TNAME[TOLL.cls]) + '</div>'
     + (d.tv || []).map(tollCard).join('')
-    + '<div class="tsect">固定收費隧道</div>'
-    + (d.fixed || []).map(tollFixedCard).join('');
+    + '<details class="tfix"><summary>固定收費隧道（' + (d.fixed || []).length + '）</summary>'
+    + '<div class="tfixbody">' + (d.fixed || []).map(tollFixedCard).join('') + '</div></details>';
   $('#tollFoot').textContent = '資料來源：' + (d.source || '運輸署開放數據')
     + '。收費每 30 秒按裝置時間重算；公眾假期依 1823 公布。';
   $$('#tollCls button').forEach(b => b.classList.toggle('on', b.dataset.c === TOLL.cls));

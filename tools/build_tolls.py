@@ -41,6 +41,26 @@ CLASSES = {
 }
 TV_CLASSES = ["MC", "PC", "TA", "OTH"]
 
+# 幹線編號（用於標示牌圖示）；按運輸署主要幹線編號
+ROUTE = {
+    "海底隧道": 1,
+    "香港仔隧道": 1,
+    "獅子山隧道": 1,
+    "東區海底隧道": 2,
+    "大老山隧道": 2,
+    "西區海底隧道": 3,
+    "大欖隧道": 3,
+    "青沙管制區": 8,
+    "城門隧道": 9,
+}
+
+
+def route_of(name):
+    for k, v in ROUTE.items():
+        if name.startswith(k):
+            return v
+    return None
+
 
 def get(url, enc="utf-8-sig"):
     req = urllib.request.Request(url, headers={"User-Agent": "park-easy/1.0"})
@@ -61,7 +81,7 @@ def build_fixed(rows):
         if not name or not cls:
             continue
         out.setdefault(name, {})[cls] = float(toll)
-    return [{"name": n, "tolls": t} for n, t in out.items()]
+    return [{"name": n, "route": route_of(n), "tolls": t} for n, t in out.items()]
 
 
 def build_tv(rows):
@@ -79,7 +99,7 @@ def build_tv(rows):
         band.setdefault(key, {})[cls] = float(r["GAZETTED_TOLL"])
     out = []
     for name, days in tv.items():
-        obj = {"name": name}
+        obj = {"name": name, "route": route_of(name)}
         for dow, bands in days.items():
             arr = []
             for (s, e), tolls in sorted(bands.items()):

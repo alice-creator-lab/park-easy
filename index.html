@@ -285,6 +285,8 @@ a{color:var(--accent)}
 }
 .fmk::before{content:'';position:absolute;inset:-8px;border-radius:50%}
 .fmk.sub{background:#93cfb6}
+/* 空位但感測器長時間沒有更新：虛線琥珀圈，表示「存疑」 */
+.fmk.stale{background:#fde3b0;border:2px dashed #b45309}
 .mrem.up{transform:translate(-50%,-190%)}
 .mrem::before{content:'';position:absolute;inset:-8px;border-radius:50%}
 
@@ -429,6 +431,7 @@ a{color:var(--accent)}
   <span><i style="background:#e02424"></i>已滿</span>
   <span><i style="background:#94a3b8"></i>無資料</span>
   <span><i style="background:#efada6"></i>貨車／旅巴位</span>
+  <span><i style="background:#fde3b0;border:2px dashed #b45309;box-sizing:border-box"></i>空位資料舊</span>
   <span><i style="background:#fff;border:2px solid #5b6b7c;box-sizing:border-box"></i>其他停車場</span>
 </div>
 
@@ -486,6 +489,7 @@ const CFG = {
   TTL_INFO     : 12*3600e3,   // 靜態資料快取
   TTL_VAC      : 24*3600e3,   // 空位快照快取（離線時用）
   STALE_AFTER  : 45*60e3,     // 超過即標示為舊資料
+  STALE_FREE   : 3*3600e3,    // 空位狀態超過此時間沒更新 → 標示為「存疑」（感測器可能失靈）
   LIST_CAP     : 60,
   TILE         : 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'
 };
@@ -968,7 +972,7 @@ function meterVisible(){
     if(m.lat < b.getSouth() || m.lat > b.getNorth() || m.lng < b.getWest() || m.lng > b.getEast()) return false;
     const o = S.occ.get(m.id);
     if(!o || o.meter === 'NU') return false;
-    if(S.onlyFree && o.s !== 'V') return false;
+    if(S.onlyFree && (o.s !== 'V' || freeStale(o))) return false;   // 資料過舊的空位不算「有位」
     if(S.q && !meterMatch(m)) return false;
     return true;
   });
@@ -979,6 +983,11 @@ function meterRemain(m){
   const o = S.occ.get(m.id);
   if(!o || o.s !== 'O' || !m.lpp || !o.t) return null;
   return m.lpp - (Date.now() - o.t) / 60000;
+}
+
+/* 空位狀態是否已長時間沒更新：感測器卡住時會一直報「空置」，實際可能已有車 */
+function freeStale(o){
+  return !!o && o.s === 'V' && (!o.t || Date.now() - o.t > CFG.STALE_FREE);
 }
 
 function remIcon(rem, id, up, sub){
@@ -1055,15 +1064,17 @@ function renderFreeMeters(){
       if(!o || o.s !== 'V') continue;
       if(S.q && !meterMatch(m)) continue;
       if(!b.contains([m.lat, m.lng])) continue;
+      const stale = freeStale(o);               // 感測器長時間報「空置」→ 虛線琥珀圈，不當作有位
       if(z >= 17){                              // 與紅色小球同尺寸、同格式
         const mk = L.marker([m.lat, m.lng], {icon: L.divIcon({className:'', iconSize:[0,0], iconAnchor:[0,0],
-          html:'<div class="fmk' + (isNonCar(m) ? ' sub' : '') + '" data-mid="' + m.id + '"></div>'}), keyboard:false, bubblingMouseEvents:false, pane:'freePane'});
+          html:'<div class="fmk' + (isNonCar(m) ? ' sub' : '') + (stale ? ' stale' : '') + '" data-mid="' + m.id + '"></div>'}), keyboard:false, bubblingMouseEvents:false, pane:'freePane'});
         mk.on('click', () => { if(tapOk()) showMeter(m); });
         freeLayer.addLayer(mk);
       }else{
         freeLayer.addLayer(L.circleMarker([m.lat, m.lng], {
-          renderer: freeCanvas, radius: isNonCar(m) ? 5 : 6, weight: 1.3, color:'#fff',
-          fillColor: isNonCar(m) ? '#93cfb6' : '#0e9f6e', fillOpacity:.95, interactive:false
+          renderer: freeCanvas, radius: isNonCar(m) ? 5 : 6, weight: stale ? 2 : 1.3,
+          color: stale ? '#b45309' : '#fff',
+          fillColor: stale ? '#fde3b0' : (isNonCar(m) ? '#93cfb6' : '#0e9f6e'), fillOpacity:.95, interactive:false
         }));
       }
     }
@@ -1076,6 +1087,7 @@ function renderFreeMeters(){
   for(const m of S.meters){
     const o = S.occ.get(m.id);
     if(!o || o.s !== 'V') continue;
+    if(freeStale(o)) continue;                   // 資料過舊不計入「有位」總數
     if(S.q && !meterMatch(m)) continue;
     if(!b.contains([m.lat, m.lng])) continue;
     const pt = map.project([m.lat, m.lng], z);
@@ -1269,19 +1281,23 @@ function meterGroups(){
     if(!meterMatch(m) || !inView(m)) return;
     const o = S.occ.get(m.id);
     if(!o || o.meter === 'NU') return;
-    if(S.onlyFree && o.s !== 'V') return;
+    if(S.onlyFree && (o.s !== 'V' || freeStale(o))) return;
     const key = m.district + '|' + m.street + '|' + m.section;
     let x = g.get(key);
     if(!x){
-      x = {street:m.street, section:m.section, district:m.district, n:0, v:0,
+      x = {street:m.street, section:m.section, district:m.district, n:0, v:0, unk:0,
            lat:m.lat, lng:m.lng, best:Infinity};
       g.set(key, x);
     }
     x.n++;
     if(o.s === 'V'){
-      x.v++;
-      const d = distM(ref, [m.lat, m.lng]);
-      if(d < x.best){ x.best = d; x.lat = m.lat; x.lng = m.lng; }
+      if(freeStale(o)){
+        x.unk++;                    // 感測器長時間報「空置」：不可當作有位
+      }else{
+        x.v++;
+        const d = distM(ref, [m.lat, m.lng]);
+        if(d < x.best){ x.best = d; x.lat = m.lat; x.lng = m.lng; }
+      }
     }else if(o.s === 'O' && m.lpp && o.t){
       /* 已泊：用「開始佔用時間 + 該錶上限」推算最快幾時有位 */
       x.occ = (x.occ || 0) + 1;
@@ -1294,7 +1310,7 @@ function meterGroups(){
     .map(x => ({x:x, d: x.v ? x.best : distM(ref, [x.lat, x.lng])}))
     .sort((a, b) => (b.x.v > 0) - (a.x.v > 0) || a.d - b.d)
     .map(o => ({street:o.x.street, section:o.x.section, district:o.x.district,
-                n:o.x.n, v:o.x.v, lat:o.x.lat, lng:o.x.lng, d:o.d,
+                n:o.x.n, v:o.x.v, unk:o.x.unk || 0, lat:o.x.lat, lng:o.x.lng, d:o.d,
                 occ:o.x.occ || 0, over:o.x.over || 0,
                 minRem:o.x.minRem == null ? null : o.x.minRem}));
 }
@@ -1302,9 +1318,11 @@ function meterGroups(){
 /* 已泊的咪錶位：最快何時有車位（以佔用開始時間 + 上限推算） */
 function meterTip(x){
   if(x.v > 0) return '';
-  if(x.minRem != null) return '最快 ' + Math.max(1, Math.ceil(x.minRem)) + ' 分鐘後有車位';
-  if(x.over) return '部分咪錶位已超時';
-  return '';
+  const bits = [];
+  if(x.unk) bits.push(x.unk + ' 個位資料過舊 · 未能確認');
+  if(x.minRem != null) bits.push('最快 ' + Math.max(1, Math.ceil(x.minRem)) + ' 分鐘後有車位');
+  else if(x.over) bits.push('部分咪錶位已超時');
+  return bits.join(' · ');
 }
 
 function meterBodyOccupied(m, o, elapsedMin){
@@ -1333,7 +1351,7 @@ function renderMeterList(){
     return;
   }
   const groups = meterGroups();
-  const fullG = groups.filter(x => x.v === 0 && x.minRem != null);
+  const fullG = groups.filter(x => x.v === 0 && !x.unk && x.minRem != null);   // 有資料過舊的場不當作已經泊滿
   const soonest = fullG.length ? Math.min.apply(null, fullG.map(x => x.minRem)) : null;
   const all = S.soonestOnly
     ? fullG.slice().sort((a, b) => a.minRem - b.minRem)
@@ -1357,7 +1375,8 @@ function renderMeterList(){
   const html = summary + '<div class="secttl">'
     + (S.soonestOnly ? '已泊滿街道 · 最快有車位優先' : '按街道分組 · 空置 / 總數') + '</div>'
     + arr.map((x, i) => {
-    const st = x.v === 0 ? 'full' : (x.v / x.n >= 0.3 ? 'free' : 'few');
+    const st = x.v === 0 ? (x.unk ? 'few' : 'full') : (x.v / x.n >= 0.3 ? 'free' : 'few');
+    const vacTxt = (x.v === 0 && x.unk) ? '—' : x.v;
     const tip = meterTip(x);
     return '<button class="row" data-i="' + i + '" data-kind="meter">'
       + '<span class="dot ' + st + '"></span>'
@@ -1365,10 +1384,10 @@ function renderMeterList(){
       + '<small>' + esc(x.district) + ' · ' + x.n + ' 個咪錶位'
       + (x.d != null ? ' · ' + distTxt(x.d) : '') + '</small>'
       + (tip ? '<small class="tip">' + tip + '</small>' : '') + '</span>'
-      + '<span class="vac ' + st + '"><b>' + x.v + '</b><small>/ ' + x.n + '</small></span></button>';
+      + '<span class="vac ' + st + '"><b>' + vacTxt + '</b><small>/ ' + x.n + '</small></span></button>';
   }).join('');
   S._meterRows = arr;
-  paintList('m|' + (summary ? 'S' + Math.ceil(soonest) + '|' : '') + arr.map(x => x.district + x.street + x.section + ':' + x.v + '/' + x.n + ':' + Math.round(x.d || 0)
+  paintList('m|' + (summary ? 'S' + Math.ceil(soonest) + '|' : '') + arr.map(x => x.district + x.street + x.section + ':' + x.v + '/' + x.n + ':' + x.unk + ':' + Math.round(x.d || 0)
               + ':' + (x.minRem == null ? '' : Math.ceil(x.minRem))).join(','), html);
 }
 
@@ -1450,13 +1469,17 @@ function showMeter(m, opt){
   listSig = '';
   const o = S.occ.get(m.id) || {s:'?'};
   const free = o.s === 'V';
-  const st = free ? 'free' : 'full';
+  const staleFree = freeStale(o);            // 官方一直報「空置」但很久沒更新 → 不可當作有位
+  const st = free ? (staleFree ? 'few' : 'free') : 'full';
   const elapsedMin = o.t ? Math.floor(Math.max(0, Date.now() - o.t) / 60000) : null;
   const hourly = (m.price && m.unit) ? m.price * 60 / m.unit : null;
   const d = S.pos ? distM([S.pos.lat, S.pos.lng], [m.lat, m.lng]) : null;
   const nav = 'https://www.google.com/maps/dir/?api=1&destination=' + m.lat + ',' + m.lng;
 
-  const body = free
+  const body = staleFree
+    ? '<div class="big"><span class="n few">未能確認</span>'
+      + '<span class="lbl">官方資料 ' + (o.t ? ago(o.t) + '前' : '—') + '最後更新<br>感測器可能失靈</span></div>'
+    : free
     ? '<div class="big"><span class="n free">有位</span>'
       + '<span class="lbl">' + (elapsedMin == null ? '' :
           elapsedMin < 2 ? '剛剛空出' : '約 ' + elapsedMin + ' 分鐘前空出') + '</span></div>'
@@ -1475,14 +1498,17 @@ function showMeter(m, opt){
 
   $('#list').innerHTML = '<div class="detail">'
     + '<div class="dhead"><button class="back" id="back">‹ 返回</button>'
-      + '<span class="pill ' + st + '">' + (free ? '空置' : o.s === 'O' ? '已佔用' : '狀態未明') + '</span></div>'
+      + '<span class="pill ' + st + '">' + (staleFree ? '資料過舊' : free ? '空置' : o.s === 'O' ? '已佔用' : '狀態未明') + '</span></div>'
     + '<h2 class="dtitle">' + esc(m.street) + (m.section ? ' · ' + esc(m.section) : '') + '</h2>'
     + '<div class="dsub">咪錶位 ' + esc(m.id) + '</div>'
     + body
     + '<dl class="kv">' + kv.map(kvRow).join('') + '</dl>'
     + '<div class="acts"><a href="' + nav + '" target="_blank" rel="noopener">導航前往</a>'
       + '<button class="ghost" id="centre">放大地圖</button></div>'
-    + '<div class="note">' + (free
+    + '<div class="note">' + (staleFree
+        ? '官方資料顯示此位自 ' + (o.t ? ago(o.t) + '前' : '—') + '起一直「空置」，已超過 '
+          + Math.round(CFG.STALE_FREE/3600e3) + ' 小時沒有更新。感測器可能失靈，實際可能已有車，請以現場情況為準。'
+        : free
         ? '「有位」由咪錶感測器偵測，最後狀態：' + (o.t ? ago(o.t) + '前' : '—') + '。'
         : '剩餘時間為推算值：開放數據只提供「已佔用」及開始佔用的時間，沒有顯示實際購票時數。'
           + '上述時間以「開始佔用時間 ＋ 該錶位的最長泊車時間」推算，故屬<b>最快</b>可用的時間——'
@@ -2141,7 +2167,7 @@ $$('#tollCls button').forEach(b => b.addEventListener('click', () => {
    12. 起動
    ============================================================ */
 window.__pe = {S:S, map:map, showPark:showPark, showMeter:showMeter, render:render,
-  meterGroups:meterGroups, meterMatch:meterMatch,
+  meterGroups:meterGroups, meterMatch:meterMatch, freeStale:freeStale,
   refreshVacancy:refreshVacancy, refreshOccupancy:refreshOccupancy, refreshLive:refreshLive,
   viewStats:viewStats, metersOnScreen:metersOnScreen, liveOnScreen:liveOnScreen,
   gestureLeft:() => Math.round(gestureUntil - Date.now()), gestureDirty:() => gestureDirty,

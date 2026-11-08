@@ -115,9 +115,9 @@ a{color:var(--accent)}
 /* ---------- legend ---------- */
 #legend{
   position:fixed;left:var(--pad);bottom:calc(var(--sheet) + 10px);z-index:600;
-  display:flex;flex-wrap:wrap;gap:10px;align-items:center;max-width:calc(100% - 2*var(--pad));
-  background:rgba(255,255,255,.94);border-radius:11px;padding:7px 10px;box-shadow:var(--sh-1);
-  font-size:10.5px;color:#475569;
+  display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center;max-width:calc(100% - 2*var(--pad));
+  background:rgba(255,255,255,.94);border-radius:11px;padding:7px 9px;box-shadow:var(--sh-1);
+  font-size:10px;color:#475569;
 }
 #legend span{display:flex;align-items:center;gap:4px;white-space:nowrap}
 #legend i{width:8px;height:8px;border-radius:50%;display:block}
@@ -272,6 +272,9 @@ a{color:var(--accent)}
   font-variant-numeric:tabular-nums;cursor:pointer;
 }
 .mrem.over{background:#7f1d1d}
+/* 貨車／旅遊巴位：淡化，以便與私家車位區分 */
+.mrem.sub{background:#efada6;color:#6b1f19}
+.mrem.sub.over{background:#f7d3ce;color:#7d3b33}
 
 /* 空位咪錶：與紅色小球同尺寸、同格式（白邊、陰影、圓形） */
 .fmk{
@@ -281,6 +284,7 @@ a{color:var(--accent)}
   border:1.5px solid #fff;box-shadow:0 1px 4px rgba(15,23,42,.38);cursor:pointer;
 }
 .fmk::before{content:'';position:absolute;inset:-8px;border-radius:50%}
+.fmk.sub{background:#93cfb6}
 .mrem.up{transform:translate(-50%,-190%)}
 .mrem::before{content:'';position:absolute;inset:-8px;border-radius:50%}
 
@@ -424,6 +428,7 @@ a{color:var(--accent)}
   <span><i style="background:#e8a400"></i>車位緊張</span>
   <span><i style="background:#e02424"></i>已滿</span>
   <span><i style="background:#94a3b8"></i>無資料</span>
+  <span><i style="background:#efada6"></i>貨車／旅巴位</span>
   <span><i style="background:#fff;border:2px solid #5b6b7c;box-sizing:border-box"></i>其他停車場</span>
 </div>
 
@@ -509,6 +514,8 @@ const OPS = {
   T:'平日 17:30–24:00；星期六 08:00–24:00；星期日及假期 10:00–22:00'
 };
 const VTS = {A:'私家車 / 客貨車', a:'私家車 / 客貨車', G:'貨車', C:'旅遊巴'};
+/* 非私家車位（貨車、旅遊巴）：地圖上用淺色顯示，方便私家車駕駛者一眼略過 */
+function isNonCar(m){ return m.vt === 'G' || m.vt === 'C'; }
 
 /* ============================================================
    2. 小工具
@@ -739,13 +746,30 @@ async function loadLive(){
   applyLive();
 }
 
+/* 數字是否可信：來源太久未更新，或 0 位但來源狀態並非「滿」，都當作未能確認 */
+function liveAgeMin(l){
+  if(!l || !l.at) return (l && l.age != null) ? l.age : null;
+  const t = Date.parse(l.at);
+  if(isNaN(t)) return (l.age != null) ? l.age : null;
+  return Math.max(0, Math.round((Date.now() - t) / 60000));
+}
+function liveTrust(l){
+  if(!l || l.n == null) return false;
+  const age = liveAgeMin(l);
+  if(age != null && age > 25) return false;           // 超過 25 分鐘未更新
+  if(l.n === 0 && l.st && l.st !== 'full') return false;  // 0 位但狀態不是「滿」
+  return true;
+}
 function applyLive(){
   S.others.forEach(o => {
     const l = S.live[o.id];
-    if(l && l.ok && l.n != null){
-      o.vac = l.n; o.cap = l.cap; o.mins = l.mins; o.fetched = S.liveGen;
+    o.live = l || null;
+    o.age = l ? liveAgeMin(l) : null;
+    if(l && l.ok && l.n != null && liveTrust(l)){
+      o.vac = l.n; o.cap = l.cap; o.mins = o.age; o.fetched = S.liveGen; o.uncertain = false;
     }else{
       o.vac = null;
+      o.uncertain = !!(l && l.ok && l.n != null);       // 有數字但不能確認
     }
   });
 }
@@ -957,11 +981,11 @@ function meterRemain(m){
   return m.lpp - (Date.now() - o.t) / 60000;
 }
 
-function remIcon(rem, id, up){
+function remIcon(rem, id, up, sub){
   const over = rem <= 0;
   return L.divIcon({
     className:'', iconSize:[0,0], iconAnchor:[0,0],
-    html:'<div class="mrem' + (over ? ' over' : '') + (up ? ' up' : '') + '" data-mid="' + id + '">'
+    html:'<div class="mrem' + (over ? ' over' : '') + (up ? ' up' : '') + (sub ? ' sub' : '') + '" data-mid="' + id + '">'
       + Math.max(0, Math.ceil(rem)) + '</div>'
   });
 }
@@ -998,14 +1022,15 @@ function renderMetersOnMap(){
     if(o.s === 'V') continue;                     // 空位改由 freeLayer 畫（最上層）
     const rem = o.s === 'O' ? meterRemain(m) : null;
     if(ballIds && ballIds.has(m.id) && rem != null){
-      const mk = L.marker([m.lat, m.lng], {icon: remIcon(rem, m.id, Math.floor(i) % 2 === 1), keyboard:false, bubblingMouseEvents:false});
+      const mk = L.marker([m.lat, m.lng], {icon: remIcon(rem, m.id, Math.floor(i) % 2 === 1, isNonCar(m)), keyboard:false, bubblingMouseEvents:false});
       mk.on('click', () => { if(tapOk()) showMeter(m); });
       meterLayer.addLayer(mk);
       continue;
     }
+    const sub = isNonCar(m);
     meterLayer.addLayer(L.circleMarker([m.lat, m.lng], {
-      renderer: canvasRenderer, radius: z >= 19 ? 7 : 6, weight: 1.3, color:'#fff',
-      fillColor: o.s === 'V' ? '#0e9f6e' : '#e02424', fillOpacity:.95, interactive:false
+      renderer: canvasRenderer, radius: sub ? (z >= 19 ? 5.5 : 5) : (z >= 19 ? 7 : 6), weight: 1.3, color:'#fff',
+      fillColor: o.s === 'V' ? (sub ? '#93cfb6' : '#0e9f6e') : (sub ? '#efada6' : '#e02424'), fillOpacity:.95, interactive:false
     }));
   }
 }
@@ -1032,13 +1057,13 @@ function renderFreeMeters(){
       if(!b.contains([m.lat, m.lng])) continue;
       if(z >= 17){                              // 與紅色小球同尺寸、同格式
         const mk = L.marker([m.lat, m.lng], {icon: L.divIcon({className:'', iconSize:[0,0], iconAnchor:[0,0],
-          html:'<div class="fmk" data-mid="' + m.id + '"></div>'}), keyboard:false, bubblingMouseEvents:false, pane:'freePane'});
+          html:'<div class="fmk' + (isNonCar(m) ? ' sub' : '') + '" data-mid="' + m.id + '"></div>'}), keyboard:false, bubblingMouseEvents:false, pane:'freePane'});
         mk.on('click', () => { if(tapOk()) showMeter(m); });
         freeLayer.addLayer(mk);
       }else{
         freeLayer.addLayer(L.circleMarker([m.lat, m.lng], {
-          renderer: freeCanvas, radius: 6, weight: 1.3, color:'#fff',
-          fillColor:'#0e9f6e', fillOpacity:.95, interactive:false
+          renderer: freeCanvas, radius: isNonCar(m) ? 5 : 6, weight: 1.3, color:'#fff',
+          fillColor: isNonCar(m) ? '#93cfb6' : '#0e9f6e', fillOpacity:.95, interactive:false
         }));
       }
     }
@@ -1178,12 +1203,14 @@ function otherRowsList(){
 
 function otherRowHtml(o, i){
   const live = o.vac != null;
-  const meta = [o.addr || (live ? '實時空位' : '無實時空位')];
+  const meta = [o.addr || (live ? '實時空位' : o.uncertain ? '實時數字待確認' : '無實時空位')];
   if(o.dist != null) meta.push(distTxt(o.dist));
   if(o.src === 'osm' && !o.addr) meta.push('OpenStreetMap');
   const cls = live ? vacClass(o.vac, o.cap) : 'unknown';
   const right = live
     ? '<span class="vac ' + cls + '"><b>' + o.vac + ' 位</b><small>' + (o.mins != null ? '實時 · ' + o.mins + ' 分鐘前' : '實時') + '</small></span>'
+    : o.uncertain
+    ? '<span class="vac unknown"><b>待確認</b><small>' + (o.age != null ? o.age + ' 分鐘前' : '數字未能確認') + '</small></span>'
     : '<span class="vac unknown"><b>無數據</b><small>其他停車場</small></span>';
   return '<button class="row" data-kind="other" data-i="' + i + '">'
     + '<span class="dot ' + cls + '"></span>'
@@ -1489,6 +1516,9 @@ function showOther(o, opt){
   const note = (o.src === 'curated' && o.vac != null)
     ? '空位數字來自信和商場 S+ 停車場系統，經 InPark AI 頁面讀取，每 10 分鐘更新一次；'
       + '此停車場未納入政府開放數據。收費資料查核日期 2026-11-03。'
+    : (o.src === 'curated' && o.uncertain)
+    ? '實時空位由信和商場 S+ 系統經 InPark AI 讀取，每 10 分鐘一次；今次讀到的數字未能通過核對'
+      + '（更新已逾 25 分鐘，或顯示 0 位但來源狀態並非「滿」），故不顯示，以免誤導。建議以商場官方 App 為準。'
     : o.src === 'curated'
     ? '此停車場未納入政府開放數據，亦未能找到實時空位數字；上表資料來自' + esc(o.source || '營辦商網站') +
       '（查核日期 2026-11-03）；' + (o.tel ? '建議先致電確認。' : '建議出發前查看停車場網站。')
@@ -1497,7 +1527,7 @@ function showOther(o, opt){
   $('#list').innerHTML = '<div class="detail">'
     + '<div class="dhead"><button class="back" id="back">‹ 返回</button>'
       + '<span class="pill ' + (o.vac != null ? vacClass(o.vac, o.cap) : 'unknown') + '">'
-      + (o.vac != null ? '實時空位' : '無實時空位') + '</span></div>'
+      + (o.vac != null ? '實時空位' : o.uncertain ? '數字待確認' : '無實時空位') + '</span></div>'
     + '<h2 class="dtitle">' + esc(o.name) + '</h2>'
     + '<div class="dsub">' + esc(o.addr || '位置由 OpenStreetMap 提供') + '</div>'
     + (o.vac != null
@@ -1505,6 +1535,11 @@ function showOther(o, opt){
           + '<span class="lbl">個空位 · 實時' + (o.cap ? '（共 ' + o.cap + ' 個）' : '') + '</span></div>'
           + '<div class="fresh">' + (o.mins != null ? o.mins + ' 分鐘前更新' : '實時更新')
           + ' · 信和商場 S+ 系統（經 InPark AI）</div>'
+        : o.uncertain
+        ? '<div class="big"><span class="n unknown txt">待確認</span>'
+          + '<span class="lbl">來源顯示 ' + (o.live && o.live.n != null ? o.live.n : '—') + ' 位，但未能通過核對<br>請以商場 App 或現場為準</span></div>'
+          + '<div class="fresh">' + (o.age != null ? '來源資料 ' + o.age + ' 分鐘前' : '來源資料時間不詳')
+          + (o.live && o.live.n === 0 ? ' · 顯示 0 位但狀態並非「滿」' : ' · 更新已逾 25 分鐘') + '</div>'
         : '<div class="big"><span class="n unknown txt">無實時數據</span>'
           + '<span class="lbl">不代表沒有車位<br>' + (o.tel ? '建議先致電確認' : '建議先查看停車場網站') + '</span></div>')
     + (kv.length ? '<dl class="kv">' + kv.map(kvRow).join('') + '</dl>' : '')
